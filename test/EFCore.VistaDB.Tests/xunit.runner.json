@@ -1,0 +1,7 @@
+{
+    "$schema": "https://xunit.net/schema/v3.0/xunit.runner.schema.json",
+    "// note": "Match the FunctionalTests project: serialize for consistency and to avoid any VistaDB engine static-state issues if unit tests ever touch the engine.",
+    "parallelizeAssembly": false,
+    "parallelizeTestCollections": false,
+    "maxParallelThreads": 1
+}

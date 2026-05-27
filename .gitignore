@@ -1,0 +1,7 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.vdb6
+*.lock

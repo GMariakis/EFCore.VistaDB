@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <Nullable>enable</Nullable>
+    <Description>VistaDB database provider for Entity Framework Core.</Description>
+    <AssemblyName>Microsoft.EntityFrameworkCore.VistaDB</AssemblyName>
+    <RootNamespace>Microsoft.EntityFrameworkCore.VistaDB</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);EF9100;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.Data.Common" />
+    <Using Include="System.Diagnostics" />
+    <Using Include="System.Linq.Expressions" />
+    <Using Include="System.Reflection" />
+    <Using Include="Microsoft.EntityFrameworkCore" />
+    <Using Include="Microsoft.EntityFrameworkCore.ChangeTracking" />
+    <Using Include="Microsoft.EntityFrameworkCore.Diagnostics" />
+    <Using Include="Microsoft.EntityFrameworkCore.Design" />
+    <Using Include="Microsoft.EntityFrameworkCore.Infrastructure" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata.Builders" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata.Conventions" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure" />
+    <Using Include="Microsoft.EntityFrameworkCore.Migrations" />
+    <Using Include="Microsoft.EntityFrameworkCore.Migrations.Operations" />
+    <Using Include="Microsoft.EntityFrameworkCore.Query" />
+    <Using Include="Microsoft.EntityFrameworkCore.Scaffolding" />
+    <Using Include="Microsoft.EntityFrameworkCore.Storage" />
+    <Using Include="Microsoft.EntityFrameworkCore.Storage.ValueConversion" />
+    <Using Include="Microsoft.EntityFrameworkCore.Update" />
+    <Using Include="Microsoft.EntityFrameworkCore.ValueGeneration" />
+    <Using Include="Microsoft.EntityFrameworkCore.Utilities" />
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <!--
+    Placeholder files for unsupported SqlServer types. The class bodies are wholly commented
+    under "VistaDB: no analog —" markers. Excluded so they don't break abstract-base contracts.
+    Remove the exclusions when reviving any of these mappings.
+  -->
+  <ItemGroup>
+    <Compile Remove="Storage\Internal\VistaDBSqlVariantTypeMapping.cs" />
+    <Compile Remove="Storage\Internal\VistaDBStructuralJsonTypeMapping.cs" />
+    <Compile Remove="Storage\Internal\VistaDBUdtTypeMapping.cs" />
+    <Compile Remove="Storage\Internal\VistaDBVectorTypeMapping.cs" />
+    <Compile Remove="ValueGeneration\Internal\VistaDBSequenceHiLoValueGenerator.cs" />
+    <Compile Remove="ValueGeneration\Internal\VistaDBSequenceValueGeneratorState.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="VistaDB.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Properties\VistaDBStrings.Designer.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>VistaDBStrings.Designer.cs</LastGenOutput>
+      <CustomToolNamespace>Microsoft.EntityFrameworkCore.VistaDB.Internal</CustomToolNamespace>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Properties\VistaDBStrings.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>VistaDBStrings.Designer.tt</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+</Project>

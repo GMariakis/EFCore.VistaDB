@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AtTimeZoneNotSupported" xml:space="preserve">
+    <value>VistaDB does not support the 'AT TIME ZONE' SQL construct.</value>
+  </data>
+  <data name="AzureSqlOptionsNotSupported" xml:space="preserve">
+    <value>VistaDB does not support Azure SQL options. Use 'UseVistaDB' instead.</value>
+  </data>
+  <data name="AzureSynapseOptionsNotSupported" xml:space="preserve">
+    <value>VistaDB does not support Azure Synapse options. Use 'UseVistaDB' instead.</value>
+  </data>
+  <data name="ComputedColumnsNotSupported" xml:space="preserve">
+    <value>VistaDB does not support computed columns. Property '{property}' on entity '{entityType}' uses 'HasComputedColumnSql'.</value>
+  </data>
+  <data name="CteNotSupported" xml:space="preserve">
+    <value>The query would require a CTE ('WITH ... AS'), which VistaDB does not support. Try restructuring the query, or split it into multiple queries.</value>
+  </data>
+  <data name="DateDiffBigNotSupported" xml:space="preserve">
+    <value>VistaDB does not support 'DATEDIFF_BIG'. Use 'DATEDIFF' with a sufficiently small unit instead.</value>
+  </data>
+  <data name="DateFromPartsNotSupported" xml:space="preserve">
+    <value>VistaDB does not support 'DATEFROMPARTS' / 'DATETIMEFROMPARTS' SQL functions.</value>
+  </data>
+  <data name="ExtendedPropertiesNotSupported" xml:space="preserve">
+    <value>VistaDB does not support extended properties (sp_addextendedproperty).</value>
+  </data>
+  <data name="FullTextSearchNotSupported" xml:space="preserve">
+    <value>VistaDB does not support full-text search (CONTAINS / FREETEXT).</value>
+  </data>
+  <data name="MemoryOptimizedTablesNotSupported" xml:space="preserve">
+    <value>VistaDB does not support memory-optimized tables.</value>
+  </data>
+  <data name="MergeNotSupported" xml:space="preserve">
+    <value>VistaDB does not support the 'MERGE' statement.</value>
+  </data>
+  <data name="WindowFunctionsNotSupported" xml:space="preserve">
+    <value>VistaDB does not support SQL window functions (e.g. 'ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)'). The query EF Core would emit uses one — typically because of a split-collection or paginated-collection translation. Restructure the query to avoid window functions, or split it into multiple round-trips.</value>
+  </data>
+  <data name="OutputClauseNotSupported" xml:space="preserve">
+    <value>VistaDB does not support the SQL 'OUTPUT' clause.</value>
+  </data>
+  <data name="SchemasNotSupported" xml:space="preserve">
+    <value>VistaDB does not support schemas. Entity type '{entityType}' is mapped to schema '{schema}'. Move it to the default schema (or omit 'HasDefaultSchema' / 'ToTable(..., schema)').</value>
+  </data>
+  <data name="SequencesNotSupported" xml:space="preserve">
+    <value>VistaDB does not support sequences. Use IDENTITY columns instead.</value>
+  </data>
+  <data name="SqlVariantNotSupported" xml:space="preserve">
+    <value>VistaDB does not support the 'sql_variant' data type.</value>
+  </data>
+  <data name="StoredProceduresNotSupported" xml:space="preserve">
+    <value>VistaDB does not support stored procedures.</value>
+  </data>
+  <data name="StructuralJsonNotSupported" xml:space="preserve">
+    <value>VistaDB does not support the SQL Server structural JSON type.</value>
+  </data>
+  <data name="TemporalTablesNotSupported" xml:space="preserve">
+    <value>VistaDB does not support temporal (system-versioned) tables. Entity type '{entityType}' is configured as temporal.</value>
+  </data>
+  <data name="UdtNotSupported" xml:space="preserve">
+    <value>VistaDB does not support user-defined CLR types (UDTs).</value>
+  </data>
+  <data name="VectorTypeNotSupported" xml:space="preserve">
+    <value>VistaDB does not support the SQL Server 'vector' data type.</value>
+  </data>
+</root>

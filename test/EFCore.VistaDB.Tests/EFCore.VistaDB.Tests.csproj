@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Microsoft.EntityFrameworkCore.VistaDB.Tests</AssemblyName>
+    <RootNamespace>Microsoft.EntityFrameworkCore</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.Data.Common" />
+    <Using Include="System.Diagnostics" />
+    <Using Include="System.Linq.Expressions" />
+    <Using Include="System.Reflection" />
+    <Using Include="System.Text" />
+    <Using Include="Microsoft.EntityFrameworkCore" />
+    <Using Include="Microsoft.EntityFrameworkCore.ChangeTracking" />
+    <Using Include="Microsoft.EntityFrameworkCore.Diagnostics" />
+    <Using Include="Microsoft.EntityFrameworkCore.Design" />
+    <Using Include="Microsoft.EntityFrameworkCore.Infrastructure" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata.Builders" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata.Conventions" />
+    <Using Include="Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure" />
+    <Using Include="Microsoft.EntityFrameworkCore.Migrations" />
+    <Using Include="Microsoft.EntityFrameworkCore.Migrations.Operations" />
+    <Using Include="Microsoft.EntityFrameworkCore.Query" />
+    <Using Include="Microsoft.EntityFrameworkCore.Scaffolding" />
+    <Using Include="Microsoft.EntityFrameworkCore.Storage" />
+    <Using Include="Microsoft.EntityFrameworkCore.Update" />
+    <Using Include="Microsoft.EntityFrameworkCore.ValueGeneration" />
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.EntityFrameworkCore.TestUtilities" />
+    <Using Include="Xunit" />
+    <Using Include="Xunit.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EFCore.VistaDB\EFCore.VistaDB.csproj" />
+    <ProjectReference Include="..\EFCore.VistaDB.FunctionalTests\EFCore.VistaDB.FunctionalTests.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+  <!--
+    Files excluded from the standalone build — they depend on EFCore in-tree test utilities
+    (FakeProvider, TestRelationalTypeMappingSource, FakeRelationalCommandDiagnosticsLogger)
+    that are not published as NuGet packages.
+  -->
+  <ItemGroup>
+    <Compile Remove="Extensions\VistaDBDatabaseFacadeExtensionsTest.cs" />
+    <Compile Remove="Storage\Internal\VistaDBConnectionTest.cs" />
+    <Compile Remove="Update\VistaDBUpdateSqlGeneratorTest.cs" />
+    <Compile Remove="Update\VistaDBModificationCommandBatchFactoryTest.cs" />
+    <Compile Remove="Update\VistaDBModificationCommandBatchTest.cs" />
+    <Compile Remove="Migrations\VistaDBHistoryRepositoryTest.cs" />
+    <!-- VistaDBSingletonOptions is registered under its interface, not concrete type; TestServiceFactory.Create<T> can't resolve it -->
+    <Compile Remove="Design\Internal\VistaDBAnnotationCodeGeneratorTest.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

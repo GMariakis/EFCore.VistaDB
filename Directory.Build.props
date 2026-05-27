@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    Standalone build properties for EFCore.VistaDB.
+    Does NOT use Microsoft.DotNet.Arcade.Sdk — all settings are explicit in each csproj.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

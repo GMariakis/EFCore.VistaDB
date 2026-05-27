@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EFCore.VistaDB/EFCore.VistaDB.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/EFCore.VistaDB.FunctionalTests/EFCore.VistaDB.FunctionalTests.csproj" />
+    <Project Path="test/EFCore.VistaDB.Tests/EFCore.VistaDB.Tests.csproj" />
+  </Folder>
+</Solution>

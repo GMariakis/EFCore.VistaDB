@@ -1,0 +1,7 @@
+{
+    "$schema": "https://xunit.net/schema/v3.0/xunit.runner.schema.json",
+    "// note": "VistaDB's static engine state (VistaDBEngine.Connections, IntraProcessLockManager) is not thread-safe. xUnit's default parallelization causes intermittent 'Cannot open data storage or file' errors and corrupts the SharedStore lifecycle. Force single-threaded execution everywhere — VS Test Explorer, dotnet test, anywhere the test host runs.",
+    "parallelizeAssembly": false,
+    "parallelizeTestCollections": false,
+    "maxParallelThreads": 1
+}
