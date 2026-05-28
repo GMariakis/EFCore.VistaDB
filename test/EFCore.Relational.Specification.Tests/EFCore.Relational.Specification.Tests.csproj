@@ -50,14 +50,22 @@
     <Compile Include="..\Shared\ModuleInitializer.cs" Link="ModuleInitializer.cs" />
   </ItemGroup>
 
+  <!--
+    This is a shared base-class LIBRARY (mirrors the in-tree EFCore.Relational.Specification.Tests),
+    NOT a runnable test project. Its tests execute only through provider projects that derive from
+    its base classes (e.g. EFCore.VistaDB.FunctionalTests). Do NOT add Microsoft.NET.Test.Sdk here —
+    that makes `dotnet test` / VS execute the provider-agnostic base tests with no store and they all
+    fail. `xunit` is referenced only so the base classes compile against [Fact]/[Theory]/Assert.
+  -->
+  <PropertyGroup>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
     <PackageReference Include="Microsoft.Extensions.DependencyModel" />
     <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="coverlet.collector" />
   </ItemGroup>
 
   <ItemGroup>
