@@ -6,7 +6,10 @@
     <Nullable>disable</Nullable>
     <AssemblyName>Microsoft.EntityFrameworkCore.VistaDB.FunctionalTests</AssemblyName>
     <RootNamespace>Microsoft.EntityFrameworkCore</RootNamespace>
+    <PreserveCompilationContext>true</PreserveCompilationContext>
     <IsTestProject>true</IsTestProject>
+    <ImplicitUsings>true</ImplicitUsings>
+    <NoWarn>$(NoWarn);CS1591;EF9100</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,21 +28,25 @@
     <Using Include="Microsoft.EntityFrameworkCore.Metadata.Conventions" />
     <Using Include="Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure" />
     <Using Include="Microsoft.EntityFrameworkCore.Migrations" />
+    <Using Include="Microsoft.EntityFrameworkCore.Migrations.Design" />
     <Using Include="Microsoft.EntityFrameworkCore.Migrations.Operations" />
     <Using Include="Microsoft.EntityFrameworkCore.Query" />
     <Using Include="Microsoft.EntityFrameworkCore.Scaffolding" />
     <Using Include="Microsoft.EntityFrameworkCore.Storage" />
+    <Using Include="Microsoft.EntityFrameworkCore.Storage.ValueConversion" />
+    <Using Include="Microsoft.EntityFrameworkCore.TestUtilities" />
     <Using Include="Microsoft.EntityFrameworkCore.Update" />
+    <Using Include="Microsoft.EntityFrameworkCore.Utilities" />
     <Using Include="Microsoft.EntityFrameworkCore.ValueGeneration" />
     <Using Include="Microsoft.Extensions.Logging" />
     <Using Include="Microsoft.Extensions.DependencyInjection" />
     <Using Include="Xunit" />
     <Using Include="Xunit.Abstractions" />
-    <Using Include="Microsoft.EntityFrameworkCore.TestUtilities" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\EFCore.VistaDB\EFCore.VistaDB.csproj" />
+    <ProjectReference Include="..\EFCore.Relational.Specification.Tests\EFCore.Relational.Specification.Tests.csproj" />
   </ItemGroup>
 
   <ItemGroup>

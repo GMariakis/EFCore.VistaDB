@@ -15,14 +15,7 @@ public class VistaDBMigrationsAnnotationProviderTest
         var modelBuilder = VistaDBTestHelpers.Instance.CreateConventionBuilder();
         modelBuilder.Entity<Entity>().Property<int>("Id").UseIdentityColumn(2, 3);
 
-        var model = modelBuilder.FinalizeModel();
-        // In EF Core 10+, standalone ModelBuilder.FinalizeModel() does not initialize relational
-        // runtime metadata (e.g. table-column mappings). Bind the model to a context to trigger
-        // IModelRuntimeInitializer — ctx.Model returns the fully-initialized runtime model.
-        using var ctx = new DbContext(new DbContextOptionsBuilder()
-            .UseVistaDB("Data Source=DummyDatabase.vdb6")
-            .UseModel(model).Options);
-        model = ctx.Model;
+        var model = modelBuilder.FinalizeModel(designTime: true);
         var property = model.FindEntityType(typeof(Entity)).FindProperty("Id");
 
         var migrationAnnotations = _annotations.For(property.GetTableColumnMappings().Single().Column, true).ToList();
@@ -40,7 +33,7 @@ public class VistaDBMigrationsAnnotationProviderTest
         var modelBuilder = SqlServerTestHelpers.Instance.CreateConventionBuilder();
         modelBuilder.Entity<Entity>().Property(e => e.IncludedProp).HasColumnName("IncludedColumn");
         modelBuilder.Entity<Entity>().HasIndex(e => e.IndexedProp).IncludeProperties(e => e.IncludedProp);
-        var model = modelBuilder.FinalizeModel();
+        var model = modelBuilder.FinalizeModel(designTime: true);
 
         Assert.Contains(
             _annotations.For(model.FindEntityType(typeof(Entity)).GetIndexes().Single().GetMappedTableIndexes().Single(), true),

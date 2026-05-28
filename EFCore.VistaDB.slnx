@@ -3,6 +3,9 @@
     <Project Path="src/EFCore.VistaDB/EFCore.VistaDB.csproj" />
   </Folder>
   <Folder Name="/test/">
+    <Project Path="test/EFCore.Relational.Specification.Tests/EFCore.Relational.Specification.Tests.csproj" />
+    <Project Path="test/EFCore.Relational.Tests/EFCore.Relational.Tests.csproj" />
+    <Project Path="test/EFCore.Specification.Tests/EFCore.Specification.Tests.csproj" />
     <Project Path="test/EFCore.VistaDB.FunctionalTests/EFCore.VistaDB.FunctionalTests.csproj" />
     <Project Path="test/EFCore.VistaDB.Tests/EFCore.VistaDB.Tests.csproj" />
   </Folder>
