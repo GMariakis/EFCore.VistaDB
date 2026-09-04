@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Text;
+using Microsoft.EntityFrameworkCore.VistaDB.Storage.Internal;
 
 namespace Microsoft.EntityFrameworkCore.VistaDB.Migrations.Internal;
 
@@ -18,8 +19,12 @@ namespace Microsoft.EntityFrameworkCore.VistaDB.Migrations.Internal;
 ///     <list type="bullet">
 ///         <item>
 ///             <description>
-///                 VistaDB has no <c>OBJECT_ID()</c> / <c>sys.tables</c>. Existence is probed via
-///                 <c>INFORMATION_SCHEMA.TABLES</c>.
+///                 VistaDB has no <c>OBJECT_ID()</c> / <c>sys.tables</c>, and it does not ship the
+///                 SQL Server-style <c>INFORMATION_SCHEMA</c> views either — querying them fails with
+///                 error 627 ("Invalid schema name. DBO must be used instead of: INFORMATION_SCHEMA").
+///                 Existence is therefore probed through the DDA surface
+///                 (<see cref="IVistaDBDdaAccessor" />), matching how
+///                 <c>VistaDBDatabaseModelFactory</c> enumerates tables during scaffolding.
 ///             </description>
 ///         </item>
 ///         <item>
@@ -66,28 +71,72 @@ public class VistaDBHistoryRepository : HistoryRepository
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    public VistaDBHistoryRepository(HistoryRepositoryDependencies dependencies)
+    private readonly IVistaDBDdaAccessor _ddaAccessor;
+
+    public VistaDBHistoryRepository(HistoryRepositoryDependencies dependencies, IVistaDBDdaAccessor ddaAccessor)
         : base(dependencies)
     {
+        _ddaAccessor = ddaAccessor;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    ///     Never executed — <see cref="Exists" /> is overridden to use DDA because VistaDB has no
+    ///     queryable catalog views. Kept because the base class requires the member.
+    /// </summary>
     protected override string ExistsSql
-    {
-        get
-        {
-            var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
-            return new StringBuilder()
-                .Append("SELECT COUNT(*) FROM [INFORMATION_SCHEMA].[TABLES] WHERE [TABLE_NAME] = ")
-                .Append(stringTypeMapping.GenerateSqlLiteral(TableName))
-                .Append(Dependencies.SqlGenerationHelper.StatementTerminator)
-                .ToString();
-        }
-    }
+        => throw new NotSupportedException(
+            "VistaDB has no INFORMATION_SCHEMA/sys catalog views; history-table existence is probed via DDA.");
 
     /// <inheritdoc />
     protected override bool InterpretExistsResult(object? value)
         => value is not null && value != DBNull.Value && Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture) > 0;
+
+    /// <summary>
+    ///     Probes for the migrations-history table. VistaDB rejects <c>INFORMATION_SCHEMA</c>
+    ///     (error 627) and DDA's <c>GetTableNames()</c> omits <c>__</c>-prefixed tables (it is meant
+    ///     to list user tables, which is what the scaffolder wants), so neither can answer this.
+    ///     Instead select from the table directly: success means it exists, and any engine error
+    ///     means it does not. A missing database file short-circuits to "not there yet".
+    /// </summary>
+    public override bool Exists()
+    {
+        string path = _ddaAccessor.GetDatabaseFilePath();
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            return false;
+        }
+
+        var sql = new StringBuilder()
+            .Append("SELECT COUNT(*) FROM ")
+            .Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(TableName, TableSchema))
+            .Append(Dependencies.SqlGenerationHelper.StatementTerminator)
+            .ToString();
+
+        try
+        {
+            var command = Dependencies.RawSqlCommandBuilder.Build(sql);
+            command.ExecuteScalar(
+                new RelationalCommandParameterObject(
+                    Dependencies.Connection,
+                    parameterValues: null,
+                    readerColumns: null,
+                    context: Dependencies.CurrentContext.Context,
+                    logger: Dependencies.CommandLogger));
+            return true;
+        }
+        catch (Exception)
+        {
+            // VistaDB raises rather than returning an empty result when the table is absent.
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public override Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Exists());
+    }
 
     /// <inheritdoc />
     public override LockReleaseBehavior LockReleaseBehavior
@@ -110,15 +159,19 @@ public class VistaDBHistoryRepository : HistoryRepository
     /// <inheritdoc />
     public override string GetCreateIfNotExistsScript()
     {
-        var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
+        // VistaDB has no procedural IF/BEGIN/END and no IF NOT EXISTS, so the condition has to be
+        // evaluated here rather than expressed in SQL. EF's migrator calls this without checking
+        // Exists() first, so emitting an unconditional CREATE makes every subsequent startup fail
+        // with "Duplicate table name". Decide now: create only when the table is genuinely absent.
+        if (Exists())
+        {
+            // An empty script is not a parseable statement for the engine, so emit a harmless no-op.
+            return "SELECT 1" + Dependencies.SqlGenerationHelper.StatementTerminator;
+        }
 
-        // VistaDB has no procedural IF/BEGIN/END at the SQL level. Probe the catalog via a SELECT and emit
-        // the CREATE only when the table is absent. Migrations always run sequentially under a connection,
-        // so this two-step pattern is sufficient.
-        // For deterministic batched idempotency we emit the CREATE TABLE unconditionally — the engine will
-        // throw on duplicate. Callers that need true idempotency should check via Exists() before invoking.
+        var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
         var builder = new StringBuilder();
-        builder.Append("-- VistaDB: idempotent create of ")
+        builder.Append("-- VistaDB: create of ")
             .Append(stringTypeMapping.GenerateSqlLiteral(TableName))
             .AppendLine(" history table")
             .AppendLine(GetCreateScript());
