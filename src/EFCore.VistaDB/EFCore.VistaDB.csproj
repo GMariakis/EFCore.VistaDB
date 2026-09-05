@@ -3,8 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <Version>1.0.3</Version>
-    <PackageReleaseNotes>1.0.1 - Fix migrations on VistaDB: the history-table existence probe used INFORMATION_SCHEMA, which VistaDB rejects (error 627). It now uses the DDA table list, matching the scaffolder.</PackageReleaseNotes>
+    <Version>1.0.4</Version>
+    <PackageReleaseNotes>1.0.4 - Boolean columns now work in queries. VistaDB has no boolean type and rejects a bare bit column where a condition is expected (error 666), so a search-condition converter, ported from the SQL Server provider, runs after all other SQL processing. 1.0.3 - Fix migrations: the history-table existence probe used INFORMATION_SCHEMA, which VistaDB rejects (error 627), and the create-if-not-exists script was unconditional, so every restart after the first failed with a duplicate table name.</PackageReleaseNotes>
     <Description>VistaDB database provider for Entity Framework Core.</Description>
     <AssemblyName>Microsoft.EntityFrameworkCore.VistaDB</AssemblyName>
     <RootNamespace>Microsoft.EntityFrameworkCore.VistaDB</RootNamespace>

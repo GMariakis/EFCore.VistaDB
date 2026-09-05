@@ -36,9 +36,10 @@ CREATE TABLE [__EFMigrationsHistory] (
     {
         var sql = CreateHistoryRepository().GetCreateIfNotExistsScript();
 
-        // VistaDB has no procedural IF/BEGIN/END; instead it prefixes a comment marker then emits the
-        // unconditional CREATE TABLE. Assert on that contract rather than the SqlServer OBJECT_ID shape.
-        Assert.Contains("-- VistaDB: idempotent create", sql);
+        // VistaDB has no procedural IF/BEGIN/END and no IF NOT EXISTS, so the condition is evaluated in
+        // C# and only the applicable branch is emitted. This context points at a database file that does
+        // not exist, so the table is absent and the create is emitted.
+        Assert.Contains("-- VistaDB: create of", sql);
         Assert.Contains("CREATE TABLE [__EFMigrationsHistory]", sql);
     }
 
@@ -94,16 +95,39 @@ VALUES (N'Migration1', N'7.0.0');
     }
 
     [ConditionalFact]
-    public void ExistsSql_uses_INFORMATION_SCHEMA_not_sys_tables()
+    public void Create_script_carries_no_SqlServer_catalog_probe()
     {
-        // VistaDB: no analog — VistaDB has no OBJECT_ID / sys.tables. The exists probe goes through
-        // INFORMATION_SCHEMA.TABLES instead.
+        // VistaDB has neither OBJECT_ID/sys.tables nor the SqlServer-style INFORMATION_SCHEMA views
+        // (querying those fails with error 627), so nothing of that shape may appear in the emitted SQL.
         var repo = (Microsoft.EntityFrameworkCore.VistaDB.Migrations.Internal.VistaDBHistoryRepository)CreateHistoryRepository();
-        // ExistsSql is protected — we exercise it indirectly by calling the public GetCreateIfNotExistsScript
-        // (which the VistaDB override does not include OBJECT_ID in). Assert OBJECT_ID is absent.
         var createIfNotExists = repo.GetCreateIfNotExistsScript();
+
         Assert.DoesNotContain("OBJECT_ID", createIfNotExists);
         Assert.DoesNotContain("sys.tables", createIfNotExists);
+        Assert.DoesNotContain("INFORMATION_SCHEMA", createIfNotExists);
+    }
+
+    [ConditionalFact]
+    public void Exists_is_false_when_the_database_file_is_absent()
+    {
+        // The probe short-circuits on a missing file rather than letting the engine raise. This is what
+        // makes the very first startup work, before any database has been created.
+        var repo = (Microsoft.EntityFrameworkCore.VistaDB.Migrations.Internal.VistaDBHistoryRepository)CreateHistoryRepository();
+
+        Assert.False(repo.Exists());
+    }
+
+    [ConditionalFact]
+    public void ExistsSql_is_not_supported()
+    {
+        // Existence is probed in C# instead; the base class still requires the member, so it throws
+        // rather than silently emitting SQL VistaDB would reject.
+        var repo = (Microsoft.EntityFrameworkCore.VistaDB.Migrations.Internal.VistaDBHistoryRepository)CreateHistoryRepository();
+        var existsSql = typeof(HistoryRepository).GetProperty(
+            "ExistsSql", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        var ex = Assert.Throws<System.Reflection.TargetInvocationException>(() => existsSql!.GetValue(repo));
+        Assert.IsType<NotSupportedException>(ex.InnerException);
     }
 
     // VistaDB: no analog — VistaDB has no sp_getapplock / sp_releaseapplock; AcquireDatabaseLock returns an inert lock.

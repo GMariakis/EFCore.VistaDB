@@ -14,12 +14,20 @@ public class VistaDBParameterBasedSqlProcessor(
     RelationalParameterBasedSqlProcessorParameters parameters)
     : RelationalParameterBasedSqlProcessor(dependencies, parameters)
 {
-    // VistaDB: no analog — SqlServer runs two additional T-SQL passes: a zero-limit converter
-    // (rewrites TOP(0) into a no-row predicate) and a search-condition converter (lifts boolean
-    // projections into CASE WHEN). Both are useful for VistaDB in theory, but the relational base
-    // produces SQL that VistaDB already accepts for the minimum-viable scenarios; ports can be
-    // added if integration tests reveal regressions. Skipping the SqlServerSqlNullabilityProcessor
-    // override for the same reason — the base implementation is sufficient.
+    /// <summary>
+    ///     Runs the base relational processing, then converts boolean expressions between
+    ///     search-condition and value form. VistaDB has no boolean type, so a bare <c>bit</c> column in a
+    ///     <c>WHERE</c> is rejected with error 666; the converter turns it into an explicit comparison,
+    ///     and in the other direction wraps predicates in <c>CASE WHEN</c> so they can be projected. It
+    ///     runs last because EF's own optimisations would otherwise collapse the comparison away again.
+    /// </summary>
+    public override Expression Process(Expression queryExpression, ParametersCacheDecorator parametersDecorator)
+        => new VistaDBSearchConditionConverter(Dependencies.SqlExpressionFactory)
+            .Visit(base.Process(queryExpression, parametersDecorator));
+
+    // VistaDB: no analog — SqlServer also runs a zero-limit converter (rewriting TOP(0) into a no-row
+    // predicate) and overrides ProcessSqlNullability with a SqlServer-specific processor. Neither is
+    // needed here; the relational base produces SQL VistaDB accepts.
     // Original SqlServer logic preserved below for future revival.
     /*
         private readonly ISqlServerSingletonOptions _sqlServerSingletonOptions;
