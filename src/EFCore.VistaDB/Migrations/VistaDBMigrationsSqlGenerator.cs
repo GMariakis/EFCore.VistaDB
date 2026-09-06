@@ -726,7 +726,7 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
                 }
                 else if (defaultValue is not null)
                 {
-                    tableSchema.DefineDefaultValue(columnName, defaultValue.ToString() ?? string.Empty, false, null);
+                    tableSchema.DefineDefaultValue(columnName, RenderDdlDefault(defaultValue), false, null);
                 }
 
                 database.AlterTable(table, tableSchema);
@@ -876,6 +876,43 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
                 .Append(")");
         }
     }
+
+    /// <summary>
+    ///     Renders a column default.
+    /// </summary>
+    /// <remarks>
+    ///     VistaDB parses DDL more strictly than it parses expressions. The bit type mapping renders
+    ///     <c>CAST(0 AS bit)</c>, which is what SQL Server wants and what VistaDB itself accepts inside a
+    ///     query — but its DDL parser rejects a CAST in a DEFAULT clause with error 285, "invalid
+    ///     expression", taking the whole ALTER TABLE down with error 120. Booleans are therefore written
+    ///     as bare <c>0</c> and <c>1</c> here, and only here; everywhere else the mapping is unchanged.
+    /// </remarks>
+    protected override void DefaultValue(
+        object? defaultValue,
+        string? defaultValueSql,
+        string? columnType,
+        MigrationCommandListBuilder builder)
+    {
+        if (defaultValueSql is null && defaultValue is bool flag)
+        {
+            builder.Append(" DEFAULT ").Append(flag ? "1" : "0");
+            return;
+        }
+
+        base.DefaultValue(defaultValue, defaultValueSql, columnType, builder);
+    }
+
+    /// <summary>
+    ///     A default value as VistaDB wants it written in DDL. Shared by the SQL and DDA paths so an
+    ///     added column and an altered one cannot disagree about what <c>false</c> looks like.
+    /// </summary>
+    protected static string RenderDdlDefault(object defaultValue)
+        => defaultValue switch
+        {
+            // "False" is what ToString gives, and VistaDB will not take it.
+            bool flag => flag ? "1" : "0",
+            _ => defaultValue.ToString() ?? string.Empty,
+        };
 
     /// <summary>
     ///     Determines whether <paramref name="operation" /> is annotated for VistaDB IDENTITY.
