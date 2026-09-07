@@ -161,10 +161,9 @@ public class RowsAffectedTest
 
         tracked.Name = "changed";
 
-        // DbUpdateException, not DbUpdateConcurrencyException: the provider deliberately throws the
-        // base type — see ThrowAggregateUpdateConcurrencyException for why. Worth revisiting now the
-        // count is trustworthy, since a 0 here really does mean a conflict.
-        Assert.Throws<DbUpdateException>(() => first.SaveChanges());
+        // The standard type, as every other provider throws: the row is genuinely gone, so this is a
+        // real optimistic-concurrency conflict and callers can catch it as one.
+        Assert.Throws<DbUpdateConcurrencyException>(() => first.SaveChanges());
     }
 
     [VistaDBInstalledFact]
@@ -191,7 +190,64 @@ public class RowsAffectedTest
 
         first.Widgets.Remove(tracked);
 
-        Assert.Throws<DbUpdateException>(() => first.SaveChanges());
+        Assert.Throws<DbUpdateConcurrencyException>(() => first.SaveChanges());
+    }
+
+    [VistaDBInstalledFact]
+    public async Task A_blocked_delete_is_not_reported_as_a_concurrency_conflict()
+    {
+        // The other side of the discriminator. VistaDB does not reject a delete that a foreign key
+        // forbids — it silently affects no rows, where SQL Server raises an engine error. Calling that
+        // a concurrency conflict would send the caller chasing a conflict that never happened, so the
+        // row still being present has to mean something different from the row being gone.
+        using var file = new TempVistaDBFile();
+        var parentId = Guid.NewGuid();
+
+        using (var ctx = new TreeContext(file.ConnectionString))
+        {
+            ctx.Database.EnsureCreated();
+            ctx.Parents.Add(new Parent { Id = parentId });
+            ctx.Children.Add(new Child { Id = Guid.NewGuid(), ParentId = parentId });
+            ctx.SaveChanges();
+        }
+
+        using (var ctx = new TreeContext(file.ConnectionString))
+        {
+            // Deleting the parent while a child still references it.
+            ctx.Parents.Remove(new Parent { Id = parentId });
+
+            DbUpdateException ex = Assert.ThrowsAny<DbUpdateException>(() => ctx.SaveChanges());
+            Assert.IsNotType<DbUpdateConcurrencyException>(ex);
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private class Parent
+    {
+        public Guid Id { get; set; }
+    }
+
+    private class Child
+    {
+        public Guid Id { get; set; }
+        public Guid ParentId { get; set; }
+    }
+
+    private class TreeContext(string cs) : DbContext
+    {
+        public DbSet<Parent> Parents => Set<Parent>();
+        public DbSet<Child> Children => Set<Child>();
+
+        protected override void OnConfiguring(DbContextOptionsBuilder o) => o.UseVistaDB(cs);
+
+        protected override void OnModelCreating(ModelBuilder b)
+        {
+            b.Entity<Parent>().Property(p => p.Id).ValueGeneratedNever();
+            b.Entity<Child>().Property(c => c.Id).ValueGeneratedNever();
+            b.Entity<Child>().HasOne<Parent>().WithMany().HasForeignKey(c => c.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        }
     }
 
     private class Widget

@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Globalization;
+using System.Text;
 using Microsoft.EntityFrameworkCore.Update;
 using Microsoft.EntityFrameworkCore.VistaDB.Storage.Internal;
 using VistaDB.DDA;
@@ -41,6 +43,10 @@ namespace Microsoft.EntityFrameworkCore.VistaDB.Update.Internal;
 public class VistaDBModificationCommandBatch : AffectedCountModificationCommandBatch
 {
     private readonly IVistaDBDdaAccessor _ddaAccessor;
+
+    // Held so ThrowAggregateUpdateConcurrencyException can probe the store before deciding which
+    // exception the caller deserves. Set on every execution path, including the base one.
+    private IRelationalConnection? _connection;
     private readonly List<IReadOnlyModificationCommand> _ddaIdentityInsertCommands = [];
 
     // Sticky flag set when at least one DDA-routed identity-insert command has been added to this batch.
@@ -106,6 +112,8 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
     /// <inheritdoc />
     public override void Execute(IRelationalConnection connection)
     {
+        _connection = connection;
+
         if (_ddaIdentityInsertCommands.Count > 0)
         {
             try
@@ -193,6 +201,8 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
     /// <inheritdoc />
     public override async Task ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken = default)
     {
+        _connection = connection;
+
         if (_ddaIdentityInsertCommands.Count > 0)
         {
             // DDA operations are synchronous; do them inline. Cooperative cancellation between rows.
@@ -384,29 +394,29 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
     }
 
     /// <summary>
-    ///     Override the base "0 rows affected" exception type so that what SqlServer would surface as a
-    ///     plain <see cref="DbUpdateException" /> (an engine-level constraint violation) is not surfaced
-    ///     by VistaDB as a misleading <see cref="DbUpdateConcurrencyException" />.
+    ///     Chooses the exception for a "0 rows affected" result, so this provider matches what every
+    ///     other one does.
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         <b>Why:</b> When EF Core's SQL UPDATE/DELETE returns 0 rows affected, the base class
-    ///         throws <see cref="DbUpdateConcurrencyException" />. SqlServer rarely hits this path for
-    ///         constraint scenarios because its engine pre-rejects the SQL with a <c>SqlException</c>
-    ///         (e.g. FK conflict error 547), which EF Core wraps as a plain
-    ///         <see cref="DbUpdateException" />. VistaDB's engine doesn't pre-reject the same scenarios
-    ///         — UPDATE/DELETE silently affect 0 rows when the FK chain wouldn't allow them — so we
-    ///         fall through to the affected-row check and throw the concurrency subclass.
+    ///         Zero rows means two quite different things on VistaDB, and they need different
+    ///         exceptions. SQL Server rarely has to tell them apart: its engine pre-rejects a
+    ///         constraint or cascade violation with an error, which EF surfaces as a plain
+    ///         <see cref="DbUpdateException" />, so a 0 that reaches the affected-row check really is a
+    ///         concurrency conflict. VistaDB does not pre-reject those — the UPDATE or DELETE silently
+    ///         affects nothing — so both causes arrive here looking identical.
     ///     </para>
     ///     <para>
-    ///         The spec tests (especially the GraphUpdates <c>ClientNoAction</c> variants which
-    ///         dominate the remaining failures, ~397) write
-    ///         <c>Assert.ThrowsAsync&lt;DbUpdateException&gt;</c> which xUnit treats as an
-    ///         <i>exact-type</i> match — the subclass fails the assertion. Override the throw to use the
-    ///         base class. For single-process file-based VistaDB, true optimistic-concurrency conflicts
-    ///         (where another connection modified the row mid-operation) are vanishingly rare; nearly
-    ///         every "0 rows affected" comes from a constraint/cascade scenario, so the base class is
-    ///         the more accurate fit anyway.
+    ///         This used to be settled by always throwing the base <see cref="DbUpdateException" />,
+    ///         which kept the GraphUpdates spec tests passing but meant a genuine conflict could not be
+    ///         caught as one, unlike on any other provider.
+    ///     </para>
+    ///     <para>
+    ///         The two are now told apart by asking the store: if the rows the statement targeted still
+    ///         match its conditions, something else refused the write and it is a plain
+    ///         <see cref="DbUpdateException" />; if they are gone or no longer match, another writer got
+    ///         there first and it is a <see cref="DbUpdateConcurrencyException" />. See
+    ///         <see cref="TargetRowsAreStillPresent" />, which fails safe towards the former.
     ///     </para>
     /// </remarks>
     protected override void ThrowAggregateUpdateConcurrencyException(
@@ -414,18 +424,110 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
         int commandIndex,
         int expectedRowsAffected,
         int rowsAffected)
+        => throw BuildZeroRowsException(commandIndex, expectedRowsAffected, rowsAffected);
+
+    /// <summary>
+    ///     Decides which exception a "0 rows affected" deserves, by asking the store whether the rows
+    ///     the statement targeted are still there.
+    ///
+    ///     If nothing matches the conditions any more, the row was changed or deleted since it was
+    ///     loaded — a real optimistic-concurrency conflict, and
+    ///     <see cref="DbUpdateConcurrencyException" /> is what every other provider throws for it.
+    ///     If the rows are still sitting there matching every condition, the write was refused for some
+    ///     other reason and calling it a concurrency conflict would send the caller chasing the wrong
+    ///     problem; that is a plain <see cref="DbUpdateException" />, which is also what SQL Server
+    ///     surfaces for the same scenarios (it rejects them in the engine, where VistaDB silently
+    ///     affects no rows instead).
+    /// </summary>
+    private DbUpdateException BuildZeroRowsException(int commandIndex, int expectedRowsAffected, int rowsAffected)
     {
         // AggregateEntries in the base is private; inline the same logic.
         var entries = new List<IUpdateEntry>();
+        var commands = new List<IReadOnlyModificationCommand>();
         for (var i = commandIndex - expectedRowsAffected; i < commandIndex; i++)
         {
             entries.AddRange(ModificationCommands[i].Entries);
+            commands.Add(ModificationCommands[i]);
         }
 
-        throw new DbUpdateException(
-            Microsoft.EntityFrameworkCore.Diagnostics.RelationalStrings.UpdateConcurrencyException(expectedRowsAffected, rowsAffected),
-            (Exception?)null,
-            entries);
+        var message = Microsoft.EntityFrameworkCore.Diagnostics.RelationalStrings
+            .UpdateConcurrencyException(expectedRowsAffected, rowsAffected);
+
+        return TargetRowsAreStillPresent(commands)
+            ? new DbUpdateException(message, (Exception?)null, entries)
+            : new DbUpdateConcurrencyException(message, (Exception?)null, entries);
+    }
+
+    /// <summary>
+    ///     Whether every row the failed statements targeted still matches the conditions they were
+    ///     written with. Runs a plain COUNT through the VistaDB connection already in hand.
+    /// </summary>
+    /// <remarks>
+    ///     Conservative on purpose. Anything unexpected — no connection, no conditions to test (an
+    ///     insert has none), a probe that throws — answers "still present", which yields the plain
+    ///     <see cref="DbUpdateException" /> this provider threw for every case before. A wrong guess
+    ///     must never turn a diagnostic into a different failure.
+    /// </remarks>
+    private bool TargetRowsAreStillPresent(IReadOnlyList<IReadOnlyModificationCommand> commands)
+    {
+        if (_connection?.DbConnection is not { } dbConnection || commands.Count == 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            foreach (IReadOnlyModificationCommand command in commands)
+            {
+                var conditions = command.ColumnModifications.Where(c => c.IsCondition).ToList();
+                if (conditions.Count == 0)
+                {
+                    // An insert has nothing to look for.
+                    return true;
+                }
+
+                using var probe = dbConnection.CreateCommand();
+                var sql = new StringBuilder("SELECT COUNT(*) FROM ")
+                    .Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(command.TableName, command.Schema))
+                    .Append(" WHERE ");
+
+                for (var i = 0; i < conditions.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        sql.Append(" AND ");
+                    }
+
+                    var parameterName = $"@probe{i}";
+                    sql.Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(conditions[i].ColumnName))
+                        .Append(" = ")
+                        .Append(parameterName);
+
+                    var parameter = probe.CreateParameter();
+                    parameter.ParameterName = parameterName;
+                    parameter.Value = conditions[i].UseOriginalValueParameter
+                        ? conditions[i].OriginalValue ?? DBNull.Value
+                        : conditions[i].Value ?? DBNull.Value;
+                    probe.Parameters.Add(parameter);
+                }
+
+                probe.CommandText = sql.ToString();
+
+                if (Convert.ToInt32(probe.ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
+                {
+                    // The row this statement aimed at is gone, or no longer matches its concurrency
+                    // token. Somebody else got there first.
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch (Exception)
+        {
+            // Diagnostics must not become the failure. Fall back to the plain exception.
+            return true;
+        }
     }
 
     /// <inheritdoc cref="ThrowAggregateUpdateConcurrencyException" />
@@ -435,19 +537,7 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
         int expectedRowsAffected,
         int rowsAffected,
         CancellationToken cancellationToken)
-    {
-        // AggregateEntries in the base is private; inline the same logic.
-        var entries = new List<IUpdateEntry>();
-        for (var i = commandIndex - expectedRowsAffected; i < commandIndex; i++)
-        {
-            entries.AddRange(ModificationCommands[i].Entries);
-        }
-
-        throw new DbUpdateException(
-            Microsoft.EntityFrameworkCore.Diagnostics.RelationalStrings.UpdateConcurrencyException(expectedRowsAffected, rowsAffected),
-            (Exception?)null,
-            entries);
-    }
+        => throw BuildZeroRowsException(commandIndex, expectedRowsAffected, rowsAffected);
 
     // VistaDB: no analog — SqlServer accumulates pending INSERTs into a MERGE ... OUTPUT batch. VistaDB
     // supports neither MERGE nor OUTPUT, so we let the base ReaderModificationCommandBatch route each
