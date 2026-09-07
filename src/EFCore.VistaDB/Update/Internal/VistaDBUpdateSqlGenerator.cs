@@ -14,6 +14,24 @@ namespace Microsoft.EntityFrameworkCore.VistaDB.Update.Internal;
 /// </summary>
 public class VistaDBUpdateSqlGenerator : UpdateAndSelectSqlGenerator, IVistaDBUpdateSqlGenerator
 {
+    // Why @@ROWCOUNT is not used to report rows affected
+    // --------------------------------------------------
+    // It is not a supported VistaDB expression. The engine documents exactly three system variables --
+    // @@IDENTITY, @@VERSION and @@TRANCOUNT -- and @@ROWCOUNT is not among them. It happens to parse,
+    // which is what made it look usable, but its value cannot be relied on: a bare "SELECT @@ROWCOUNT"
+    // with no preceding statement returns 1, and the 6.6.0 release notes record a fix for it reporting
+    // the wrong count in a multi-statement batch. "INSERT …; SELECT @@ROWCOUNT;" is precisely such a
+    // batch.
+    //
+    // When it under-reports, EF Core sees zero rows affected for a write that in fact succeeded and
+    // throws DbUpdateConcurrencyException -- a conflict that never happened, on a row that is sitting
+    // in the table.
+    //
+    // So a command with nothing to read back now emits the bare INSERT/UPDATE/DELETE and returns
+    // NoResults, and EF Core takes the count from ExecuteNonQuery, which is reliable. The
+    // SELECT-back path remains only where a value genuinely has to be read (an IDENTITY key), and
+    // there the row is located by its key rather than by a row count.
+
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
     ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
@@ -92,6 +110,18 @@ public class VistaDBUpdateSqlGenerator : UpdateAndSelectSqlGenerator, IVistaDBUp
             return ResultSetMapping.LastInResultSet;
         }
 
+        // Nothing to read back: emit the bare INSERT and let ADO.NET report how many rows it
+        // affected. See RowsAffectedIsReadFromAdoNet below for why @@ROWCOUNT is not used.
+        if (readOperations.Count == 0)
+        {
+            AppendInsertCommand(
+                commandStringBuilder, command.TableName, command.Schema,
+                operations.Where(o => o.IsWrite).ToList(), readOperations: []);
+
+            requiresTransaction = false;
+            return ResultSetMapping.NoResults;
+        }
+
         return AppendInsertAndSelectOperation(commandStringBuilder, command, commandPosition, out requiresTransaction);
 
         // VistaDB: no analog — VistaDB does not support the OUTPUT clause, so we never take the
@@ -130,14 +160,23 @@ public class VistaDBUpdateSqlGenerator : UpdateAndSelectSqlGenerator, IVistaDBUp
             IReadOnlyModificationCommand command,
             int commandPosition,
             out bool requiresTransaction)
-        // VistaDB: no analog — no OUTPUT clause; always do UPDATE + SELECT @@ROWCOUNT.
-        // Original SqlServer logic preserved below for future revival when VistaDB adds OUTPUT support.
-        /*
-            => CanUseOutputClause(command)
-                ? AppendUpdateReturningOperation(commandStringBuilder, command, commandPosition, out requiresTransaction)
-                : AppendUpdateAndSelectOperation(commandStringBuilder, command, commandPosition, out requiresTransaction);
-        */
-        => AppendUpdateAndSelectOperation(commandStringBuilder, command, commandPosition, out requiresTransaction);
+    {
+        // VistaDB: no analog — no OUTPUT clause, so a read-back needs a following SELECT. Without one,
+        // the bare UPDATE is enough and ADO.NET reports the row count.
+        if (command.ColumnModifications.All(o => !o.IsRead))
+        {
+            AppendUpdateCommand(
+                commandStringBuilder, command.TableName, command.Schema,
+                command.ColumnModifications.Where(o => o.IsWrite).ToList(),
+                readOperations: [],
+                command.ColumnModifications.Where(o => o.IsCondition).ToList());
+
+            requiresTransaction = false;
+            return ResultSetMapping.NoResults;
+        }
+
+        return AppendUpdateAndSelectOperation(commandStringBuilder, command, commandPosition, out requiresTransaction);
+    }
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -150,14 +189,16 @@ public class VistaDBUpdateSqlGenerator : UpdateAndSelectSqlGenerator, IVistaDBUp
             IReadOnlyModificationCommand command,
             int commandPosition,
             out bool requiresTransaction)
-        // VistaDB: no analog — no OUTPUT clause; always do DELETE + SELECT @@ROWCOUNT.
-        // Original SqlServer logic preserved below for future revival when VistaDB adds OUTPUT support.
-        /*
-            => CanUseOutputClause(command)
-                ? AppendDeleteReturningOperation(commandStringBuilder, command, commandPosition, out requiresTransaction)
-                : AppendDeleteAndSelectOperation(commandStringBuilder, command, commandPosition, out requiresTransaction);
-        */
-        => AppendDeleteAndSelectOperation(commandStringBuilder, command, commandPosition, out requiresTransaction);
+    {
+        // A delete never reads anything back, so this is always the bare statement.
+        AppendDeleteCommand(
+            commandStringBuilder, command.TableName, command.Schema,
+            readOperations: [],
+            command.ColumnModifications.Where(o => o.IsCondition).ToList());
+
+        requiresTransaction = false;
+        return ResultSetMapping.NoResults;
+    }
 
     // VistaDB: no analog — SqlServer overrides AppendInsertCommand/AppendUpdateCommand/AppendDeleteCommand to
     // place an OUTPUT clause inside the statement, and AppendStoredProcedureCall to emit EXEC. VistaDB supports
@@ -306,7 +347,11 @@ public class VistaDBUpdateSqlGenerator : UpdateAndSelectSqlGenerator, IVistaDBUp
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
     protected override void AppendRowsAffectedWhereCondition(StringBuilder commandStringBuilder, int expectedRowsAffected)
-        => commandStringBuilder
-            .Append("@@ROWCOUNT = ")
-            .Append(expectedRowsAffected.ToString(CultureInfo.InvariantCulture));
+        // The read-back after an IDENTITY insert is the one place a SELECT still follows the write.
+        // SqlServer guards it with "@@ROWCOUNT = 1"; here that would reintroduce the same unreliable
+        // variable, and a spurious 0 would hide a row that was inserted perfectly well. The key
+        // predicate that follows already identifies the row on its own, so this contributes a
+        // tautology rather than a condition — if the insert did not happen, no row matches and EF
+        // still sees it.
+        => commandStringBuilder.Append("1 = 1");
 }

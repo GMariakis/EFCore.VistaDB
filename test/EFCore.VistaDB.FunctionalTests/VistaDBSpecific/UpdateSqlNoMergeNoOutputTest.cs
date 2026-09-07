@@ -100,8 +100,15 @@ public class UpdateSqlNoMergeNoOutputTest
     }
 
     [VistaDBInstalledFact]
-    public async Task Update_emits_ROWCOUNT_check()
+    public async Task Update_does_not_emit_a_ROWCOUNT_check()
     {
+        // This used to assert the opposite. @@ROWCOUNT is not a supported VistaDB expression — the
+        // engine documents only @@IDENTITY, @@VERSION and @@TRANCOUNT — and the 6.6.0 notes record a
+        // fix for it miscounting in a multi-statement batch, which is exactly what EF sends. When it
+        // under-reported, a write that had in fact landed came back as a concurrency conflict.
+        //
+        // A plain update now emits the bare statement, and the row count is taken from
+        // ExecuteNonQuery, which is reliable. See VistaDBModificationCommandBatch.
         await using var store = await VistaDBTestStore.CreateInitializedAsync("UpdateSqlRowcount");
         var logger = new SqlCapturingLoggerFactory();
         using var ctx = new MergeContext(store.ConnectionString, logger);
@@ -115,9 +122,13 @@ public class UpdateSqlNoMergeNoOutputTest
         item.Name = "y";
         ctx.SaveChanges();
 
-        Assert.Contains(
+        Assert.DoesNotContain(
             logger.Statements,
             s => s.Contains("@@ROWCOUNT", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Contains(
+            logger.Statements,
+            s => s.Contains("UPDATE", StringComparison.OrdinalIgnoreCase));
     }
 
     private class MergeContext : DbContext

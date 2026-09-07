@@ -127,7 +127,66 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
 
         if (!IsDdaOnly)
         {
-            base.Execute(connection);
+            if (AllCommandsReportRowsAffectedOnly())
+            {
+                ExecuteAndVerifyRowsAffected(connection);
+            }
+            else
+            {
+                base.Execute(connection);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Whether every command in this batch is a plain write with nothing to read back.
+    ///
+    ///     Those are emitted as bare INSERT/UPDATE/DELETE with no trailing SELECT, because VistaDB has
+    ///     no usable <c>@@ROWCOUNT</c> — see the note at the top of
+    ///     <see cref="VistaDBUpdateSqlGenerator" />. EF Core's reader-based consumer skips the
+    ///     rows-affected check entirely for such commands, so the verification has to happen here.
+    /// </summary>
+    private bool AllCommandsReportRowsAffectedOnly()
+        => ResultSetMappings.Count > 0 && ResultSetMappings.All(m => m == ResultSetMapping.NoResults);
+
+    /// <summary>
+    ///     Runs the batch with <c>ExecuteNonQuery</c> and checks the count the engine reports.
+    ///
+    ///     This is the one mechanism VistaDB reports reliably: measured on 6.6.2, a batch of three
+    ///     inserts returns 3, one hit plus one miss returns 1, and two misses return 0. Going through
+    ///     the reader instead yields <c>RecordsAffected == -1</c>, which tells us nothing.
+    /// </summary>
+    private void ExecuteAndVerifyRowsAffected(IRelationalConnection connection)
+    {
+        int rowsAffected;
+        try
+        {
+            rowsAffected = StoreCommand!.RelationalCommand.ExecuteNonQuery(
+                new RelationalCommandParameterObject(
+                    connection,
+                    StoreCommand.ParameterValues,
+                    null,
+                    Dependencies.CurrentContext.Context,
+                    Dependencies.Logger,
+                    CommandSource.SaveChanges));
+        }
+        catch (DbUpdateException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DbUpdateException(
+                RelationalStrings.UpdateStoreException, ex, ModificationCommands.SelectMany(c => c.Entries).ToList());
+        }
+
+        int expected = ModificationCommands.Count;
+        if (rowsAffected < expected)
+        {
+            // Fewer rows than commands means at least one write matched nothing — the row was changed
+            // or deleted by someone else since it was loaded.
+            ThrowAggregateUpdateConcurrencyException(
+                reader: null, commandIndex: expected, expectedRowsAffected: expected, rowsAffected: rowsAffected);
         }
     }
 
@@ -153,7 +212,49 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
 
         if (!IsDdaOnly)
         {
-            await base.ExecuteAsync(connection, cancellationToken).ConfigureAwait(false);
+            if (AllCommandsReportRowsAffectedOnly())
+            {
+                await ExecuteAndVerifyRowsAffectedAsync(connection, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await base.ExecuteAsync(connection, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <inheritdoc cref="ExecuteAndVerifyRowsAffected" />
+    private async Task ExecuteAndVerifyRowsAffectedAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+    {
+        int rowsAffected;
+        try
+        {
+            rowsAffected = await StoreCommand!.RelationalCommand.ExecuteNonQueryAsync(
+                new RelationalCommandParameterObject(
+                    connection,
+                    StoreCommand.ParameterValues,
+                    null,
+                    Dependencies.CurrentContext.Context,
+                    Dependencies.Logger,
+                    CommandSource.SaveChanges),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new DbUpdateException(
+                RelationalStrings.UpdateStoreException, ex, ModificationCommands.SelectMany(c => c.Entries).ToList());
+        }
+
+        int expected = ModificationCommands.Count;
+        if (rowsAffected < expected)
+        {
+            await ThrowAggregateUpdateConcurrencyExceptionAsync(
+                reader: null, commandIndex: expected, expectedRowsAffected: expected,
+                rowsAffected: rowsAffected, cancellationToken).ConfigureAwait(false);
         }
     }
 
