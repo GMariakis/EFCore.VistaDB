@@ -73,14 +73,11 @@ public class VistaDBDdaAccessor : IVistaDBDdaAccessor
         var filePath = ResolveDatabaseFilePath();
         var password = ExtractPassword(_connection.ConnectionString);
 
-        // Use SingleProcessReadWrite (and SingleProcessReadOnly) so the DDA database handle can coexist
-        // with the open ADO.NET VistaDBConnection in the same process. With MultiProcessReadWrite the
-        // engine's IntraProcessLockManager rejects the second open ("Cannot open data storage or file")
-        // because it treats the two opens as cross-process even though they're in the same AppDomain.
-        // The ADO.NET connection's open mode is set to match in VistaDBConnection.CreateDbConnection.
-        var mode = readOnly
-            ? VistaDBDatabaseOpenMode.SingleProcessReadOnly
-            : VistaDBDatabaseOpenMode.SingleProcessReadWrite;
+        // Whatever family the ADO.NET connection is in, this handle joins it. The engine refuses a
+        // MultiProcess handle beside a SingleProcess one — measured, both directions — and this used
+        // to hardcode SingleProcess while VistaDBConnection augmented the connection to MultiProcess,
+        // which is exactly that refusal. See VistaDBOpenModes.
+        var mode = VistaDBOpenModes.ForDda(_connection.ConnectionString, readOnly);
 
         return Dda.OpenDatabase(filePath, mode, password);
     }

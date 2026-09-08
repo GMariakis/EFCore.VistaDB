@@ -167,13 +167,11 @@ public class VistaDBDatabaseCreator(
         }
 
         using var dda = VistaDBEngine.Connections.OpenDDA();
-        // Match the connection-level Open Mode chosen by VistaDBConnection.AugmentConnectionString
-        // (SingleProcessReadWrite). SharedReadOnly is FileShare-incompatible with an already-open
-        // SingleProcessReadWrite handle in the same or another process, so probing with SharedReadOnly
-        // can spuriously fail with "process cannot access the file" when EF Core has held the .vdb6
-        // open earlier in the test/fixture lifecycle. SingleProcessReadOnly is the read-only sibling
-        // and shares the same locking class.
-        using var database = dda.OpenDatabase(fileName, global::VistaDB.VistaDBDatabaseOpenMode.SingleProcessReadOnly, null);
+        // The read-only sibling of whatever family the connection is in. A probe from another family
+        // fails against a .vdb6 EF Core already has open — which is what this comment used to describe
+        // while naming a mode the connection had stopped using. See VistaDBOpenModes.
+        using var database = dda.OpenDatabase(
+            fileName, VistaDBOpenModes.ForDda(_connection.ConnectionString, readOnly: true), null);
         var hasTables = false;
         foreach (var tableName in database.GetTableNames())
         {

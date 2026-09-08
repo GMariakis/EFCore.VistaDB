@@ -29,15 +29,13 @@ public class VistaDBConnection : RelationalConnection, IVistaDBConnection
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
     /// <remarks>
-    ///     We augment the user-supplied connection string with <c>Open Mode=MultiProcessReadWrite</c> when
-    ///     the caller hasn't already chosen an explicit mode. <c>.vdb6</c> files can be opened many times —
-    ///     by EF Core's ADO.NET pipeline, by parallel DDA handles (<see cref="IVistaDBDdaAccessor" /> for
-    ///     Tier-2 operations like IDENTITY_INSERT), and by the scaffolding model factory's introspection
-    ///     queries. <c>SingleProcessReadWrite</c> blocks the DDA handle from opening alongside the ADO.NET
-    ///     connection (VistaDB error 219). <c>MultiProcessReadWrite</c> allows all three to coexist.
-    ///     Users who want stricter exclusivity can specify <c>Open Mode=SingleProcessReadWrite</c> or
-    ///     <c>Open Mode=ExclusiveReadWrite</c> explicitly in their connection string and the override
-    ///     below leaves it untouched.
+    ///     We augment the user-supplied connection string with <see cref="VistaDBOpenModes.Default" />
+    ///     when the caller hasn't already chosen an explicit mode. A <c>.vdb6</c> is opened several ways
+    ///     at once — this connection, the DDA handles used for Tier-2 work, and the scaffolding factory's
+    ///     introspection — and every one of them has to be in the same locking family or the engine
+    ///     refuses. Those other openers derive their mode from this connection string, so a caller who
+    ///     names <c>Open Mode</c> explicitly moves all of them together and this override leaves it
+    ///     untouched.
     /// </remarks>
     protected override DbConnection CreateDbConnection()
         => new global::VistaDB.Provider.VistaDBConnection(AugmentConnectionString(GetValidatedConnectionString()));
@@ -48,9 +46,9 @@ public class VistaDBConnection : RelationalConnection, IVistaDBConnection
 
         // Only set Open Mode if the caller didn't already specify it. The connection-string keyword
         // is "Open Mode" (with the space) — VistaDBConnectionStringBuilder.OpenMode is the typed alias.
-        if (!builder.ContainsKey("Open Mode"))
+        if (!builder.ContainsKey(VistaDBOpenModes.Keyword))
         {
-            builder.OpenMode = global::VistaDB.VistaDBDatabaseOpenMode.MultiProcessReadWrite;
+            builder.OpenMode = VistaDBOpenModes.Default;
         }
 
         return builder.ConnectionString;
