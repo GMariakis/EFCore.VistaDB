@@ -25,24 +25,35 @@ public class VistaDBOpenModesTest
     private const string Path = "Data Source=C:\\db\\gate.vdb6;";
 
     [ConditionalFact]
-    public void Multi_process_is_the_default_when_the_connection_string_names_no_mode()
-        // The permissive choice: SingleProcess means "shared inside this process and nowhere else",
-        // which locks out tooling and a second application for no benefit.
-        => Assert.Equal(VistaDBDatabaseOpenMode.MultiProcessReadWrite, VistaDBOpenModes.FromConnectionString(Path));
+    public void What_the_provider_writes_in_and_what_the_engine_assumes_are_not_the_same()
+    {
+        // Conflating these is the trap. EF Core only builds the connection when it was configured with
+        // a connection string; hand it a DbConnection you made yourself and nothing augments it, so the
+        // engine's own default applies and it is the opposite family.
+        Assert.Equal(VistaDBDatabaseOpenMode.MultiProcessReadWrite, VistaDBOpenModes.Default);
+        Assert.Equal(VistaDBDatabaseOpenMode.SingleProcessReadWrite, VistaDBOpenModes.EngineDefault);
+    }
 
     [ConditionalTheory]
     [InlineData(null)]
     [InlineData("")]
-    public void Nothing_at_all_is_still_the_default(string? connectionString)
-        => Assert.Equal(VistaDBDatabaseOpenMode.MultiProcessReadWrite, VistaDBOpenModes.FromConnectionString(connectionString));
+    public void A_string_naming_no_mode_resolves_to_what_the_engine_would_do(string? connectionString)
+        => Assert.Equal(VistaDBDatabaseOpenMode.SingleProcessReadWrite, VistaDBOpenModes.FromConnectionString(connectionString));
 
     [ConditionalFact]
-    public void A_dda_handle_defaults_to_the_family_the_connection_defaults_to()
+    public void An_unaugmented_connection_string_keeps_the_dda_handle_in_the_engines_family()
+        // A raw VistaDBConnection reserves the file for SingleProcess. Asking for MultiProcess beside it
+        // is error 219, which is what a MultiProcess assumption here produced.
+        => Assert.Equal(VistaDBDatabaseOpenMode.SingleProcessReadWrite, VistaDBOpenModes.ForDda(Path, readOnly: false));
+
+    [ConditionalFact]
+    public void An_augmented_connection_string_takes_the_dda_handle_to_multi_process()
     {
-        // This is the regression. The DDA handle hardcoded SingleProcessReadWrite while the connection
-        // was augmented to MultiProcessReadWrite, and the engine refuses that pairing.
-        Assert.Equal(VistaDBDatabaseOpenMode.MultiProcessReadWrite, VistaDBOpenModes.ForDda(Path, readOnly: false));
-        Assert.Equal(VistaDBDatabaseOpenMode.MultiProcessReadOnly, VistaDBOpenModes.ForDda(Path, readOnly: true));
+        // The normal path: EF built the connection, so VistaDBConnection wrote Default into it.
+        var augmented = Path + $"Open Mode={VistaDBOpenModes.Default};";
+
+        Assert.Equal(VistaDBDatabaseOpenMode.MultiProcessReadWrite, VistaDBOpenModes.ForDda(augmented, readOnly: false));
+        Assert.Equal(VistaDBDatabaseOpenMode.MultiProcessReadOnly, VistaDBOpenModes.ForDda(augmented, readOnly: true));
     }
 
     [ConditionalTheory]
@@ -81,7 +92,7 @@ public class VistaDBOpenModesTest
         // The engine will reject it on open with a message about the mode; failing here would blame the
         // provider for the user's typo and bury the real one.
         => Assert.Equal(
-            VistaDBDatabaseOpenMode.MultiProcessReadWrite,
+            VistaDBDatabaseOpenMode.SingleProcessReadWrite,
             VistaDBOpenModes.FromConnectionString(Path + "Open Mode=Nonsense;"));
 
     [ConditionalFact]

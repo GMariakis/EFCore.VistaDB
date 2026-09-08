@@ -37,7 +37,7 @@ namespace Microsoft.EntityFrameworkCore.VistaDB.Storage.Internal;
 public static class VistaDBOpenModes
 {
     /// <summary>
-    ///     What a connection string that names no <c>Open Mode</c> gets.
+    ///     What this provider writes into a connection string that names no <c>Open Mode</c>.
     ///
     ///     MultiProcess because it is strictly the more permissive of the two: SingleProcess means
     ///     "shared inside this process and nowhere else", so it locks out a second application, any
@@ -45,6 +45,18 @@ public static class VistaDBOpenModes
     ///     Nothing about the single-process case is faster or safer here — it is only narrower.
     /// </summary>
     public const VistaDBDatabaseOpenMode Default = VistaDBDatabaseOpenMode.MultiProcessReadWrite;
+
+    /// <summary>
+    ///     What the engine itself does with a connection string that names no <c>Open Mode</c>, which
+    ///     is not the same thing as <see cref="Default" /> and must not be confused with it.
+    ///
+    ///     EF Core only builds the connection when it was configured with a connection string; hand it
+    ///     a <c>DbConnection</c> you constructed and <c>VistaDBConnection.CreateDbConnection</c> never
+    ///     runs, so nothing augments it and the engine's own default applies. Assuming otherwise makes
+    ///     the DDA handles ask for MultiProcess against a file the raw connection has already reserved
+    ///     for SingleProcess — error 219, which is how this was found.
+    /// </summary>
+    public const VistaDBDatabaseOpenMode EngineDefault = VistaDBDatabaseOpenMode.SingleProcessReadWrite;
 
     /// <summary>The connection-string keyword. VistaDB spells it with the space.</summary>
     public const string Keyword = "Open Mode";
@@ -60,14 +72,19 @@ public static class VistaDBOpenModes
     }
 
     /// <summary>
-    ///     The mode named in the connection string, or <see cref="Default" /> when it names none or
-    ///     names something unparseable — the same value <c>VistaDBConnection</c> would have written in.
+    ///     The mode this connection string actually resolves to: the one it names, or
+    ///     <see cref="EngineDefault" /> when it names none.
+    ///
+    ///     Pass the live <c>DbConnection.ConnectionString</c> rather than the string EF Core was
+    ///     configured with. The two differ exactly when EF built the connection, and the difference is
+    ///     the augmentation — reading the configured string would miss it and report the engine default
+    ///     for a connection that is in fact MultiProcess.
     /// </summary>
     public static VistaDBDatabaseOpenMode FromConnectionString(string? connectionString)
     {
         if (string.IsNullOrEmpty(connectionString))
         {
-            return Default;
+            return EngineDefault;
         }
 
         var builder = new DbConnectionStringBuilder { ConnectionString = connectionString };
@@ -75,7 +92,7 @@ public static class VistaDBOpenModes
         return builder.TryGetValue(Keyword, out var value)
             && Enum.TryParse<VistaDBDatabaseOpenMode>(value as string, ignoreCase: true, out var mode)
                 ? mode
-                : Default;
+                : EngineDefault;
     }
 
     /// <summary>The read-write member of the same locking family.</summary>

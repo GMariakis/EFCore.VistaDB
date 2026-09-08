@@ -77,7 +77,9 @@ public class VistaDBDdaAccessor : IVistaDBDdaAccessor
         // MultiProcess handle beside a SingleProcess one — measured, both directions — and this used
         // to hardcode SingleProcess while VistaDBConnection augmented the connection to MultiProcess,
         // which is exactly that refusal. See VistaDBOpenModes.
-        var mode = VistaDBOpenModes.ForDda(_connection.ConnectionString, readOnly);
+        // The live connection's string, not the one EF Core was configured with: those differ exactly
+        // when EF built the connection, and the difference is the Open Mode it augmented in.
+        var mode = VistaDBOpenModes.ForDda(_connection.DbConnection.ConnectionString, readOnly);
 
         return Dda.OpenDatabase(filePath, mode, password);
     }

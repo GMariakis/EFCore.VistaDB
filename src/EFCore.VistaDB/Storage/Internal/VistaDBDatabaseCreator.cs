@@ -171,7 +171,7 @@ public class VistaDBDatabaseCreator(
         // fails against a .vdb6 EF Core already has open — which is what this comment used to describe
         // while naming a mode the connection had stopped using. See VistaDBOpenModes.
         using var database = dda.OpenDatabase(
-            fileName, VistaDBOpenModes.ForDda(_connection.ConnectionString, readOnly: true), null);
+            fileName, VistaDBOpenModes.ForDda(_connection.DbConnection.ConnectionString, readOnly: true), null);
         var hasTables = false;
         foreach (var tableName in database.GetTableNames())
         {
