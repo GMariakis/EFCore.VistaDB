@@ -9,15 +9,16 @@ namespace Microsoft.EntityFrameworkCore;
 
 public class ScaffoldingVistaDBTest
 {
-    // VistaDB's engine caches a SingleProcessReadWrite file-mode reservation from CreateDatabase that
-    // persists across handle closes. Opening the parallel DDA accessor used by VistaDBDatabaseModelFactory
-    // for rich introspection fails with error 219 ("Cannot open for MultiProcess use because the database
-    // file is already reserved for SingleProcess use") — even when the .vdb6 file is created with
-    // staySingleProcess: false and the EF Core ADO.NET wrapper defaults to MultiProcessReadWrite.
-    // The factory works correctly against pre-existing .vdb6 files that haven't been freshly created in
-    // the same process. Document as a known scaffolding limitation; full INFORMATION_SCHEMA-only fallback
-    // is tracked as a follow-up.
-    [VistaDBInstalledFact(Skip = "VistaDB: DDA + SQL coexistence in scaffolding after fresh CreateDatabase fails with engine error 219. Real-world database-first scaffolding works against pre-existing .vdb6 files.")]
+    // Was skipped for error 219, blamed on the engine caching a SingleProcessReadWrite reservation from
+    // CreateDatabase that outlived its handle. That was not it. The reservation came from the provider
+    // itself: EnsureCreated ran HasTables and the DDA accessor, both of which hardcoded SingleProcess,
+    // against a connection the provider had augmented to MultiProcess. The scaffolding factory then asked
+    // for MultiProcess and the engine refused, because the provider's own handles had already put the
+    // file in the other family.
+    //
+    // Nothing about scaffolding needed fixing. Once every handle derives its mode from the connection
+    // string (VistaDBOpenModes), this passes.
+    [VistaDBInstalledFact]
     public void Reverse_engineer_simple_table_yields_expected_database_model()
     {
         using var file = new TempVistaDBFile();
