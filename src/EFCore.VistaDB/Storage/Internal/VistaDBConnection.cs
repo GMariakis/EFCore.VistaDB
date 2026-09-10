@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Data.Common;
+
 namespace Microsoft.EntityFrameworkCore.VistaDB.Storage.Internal;
 
 /// <summary>
@@ -40,18 +42,27 @@ public class VistaDBConnection : RelationalConnection, IVistaDBConnection
     protected override DbConnection CreateDbConnection()
         => new global::VistaDB.Provider.VistaDBConnection(AugmentConnectionString(GetValidatedConnectionString()));
 
+    /// <summary>Test seam: the augmentation is the part that silently did nothing.</summary>
+    public static string AugmentConnectionStringForTesting(string connectionString)
+        => AugmentConnectionString(connectionString);
+
     private static string AugmentConnectionString(string connectionString)
     {
-        var builder = new global::VistaDB.Provider.VistaDBConnectionStringBuilder(connectionString);
-
-        // Only set Open Mode if the caller didn't already specify it. The connection-string keyword
-        // is "Open Mode" (with the space) — VistaDBConnectionStringBuilder.OpenMode is the typed alias.
-        if (!builder.ContainsKey(VistaDBOpenModes.Keyword))
+        // Ask a plain DbConnectionStringBuilder whether the caller named a mode, not VistaDB's own.
+        // VistaDBConnectionStringBuilder pre-populates its strongly-typed keywords, so ContainsKey
+        // returns true for "Open Mode" on a string that never mentioned it — which silently skipped
+        // this whole method and left every connection on the engine default of SingleProcess. The
+        // base builder only holds keys that are actually present.
+        var supplied = new DbConnectionStringBuilder { ConnectionString = connectionString };
+        if (supplied.ContainsKey(VistaDBOpenModes.Keyword))
         {
-            builder.OpenMode = VistaDBOpenModes.Default;
+            return connectionString;
         }
 
-        return builder.ConnectionString;
+        return new global::VistaDB.Provider.VistaDBConnectionStringBuilder(connectionString)
+        {
+            OpenMode = VistaDBOpenModes.Default,
+        }.ConnectionString;
     }
 
     /// <summary>

@@ -100,4 +100,26 @@ public class VistaDBOpenModesTest
         // "OpenMode" without the space is not the connection-string keyword; a mismatch here would make
         // an explicit choice silently ignored and put the openers back out of step.
         => Assert.Equal("Open Mode", VistaDBOpenModes.Keyword);
+
+    [ConditionalFact]
+    public void The_augmented_string_really_carries_the_mode()
+    {
+        // The regression that made every one of the tests above meaningless. VistaDB's own builder
+        // pre-populates its typed keywords, so ContainsKey("Open Mode") is true on a string that
+        // never named one — the augmentation guard was never satisfied, nothing was written, and
+        // every connection opened on the engine default of SingleProcess. Asserting the resulting
+        // string is what catches it; asserting what the mode helper computes does not.
+        var augmented = VistaDBConnection.AugmentConnectionStringForTesting(Path);
+
+        Assert.Contains($"{VistaDBOpenModes.Keyword}={VistaDBOpenModes.Default}", augmented);
+        Assert.Equal(VistaDBOpenModes.Default, VistaDBOpenModes.FromConnectionString(augmented));
+    }
+
+    [ConditionalFact]
+    public void An_explicit_mode_survives_augmentation_untouched()
+    {
+        var chosen = Path + "Open Mode=SingleProcessReadWrite;";
+
+        Assert.Equal(chosen, VistaDBConnection.AugmentConnectionStringForTesting(chosen));
+    }
 }
