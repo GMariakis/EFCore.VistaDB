@@ -108,7 +108,7 @@ public class VistaDBTimeSpanTypeMapping : TimeSpanTypeMapping
     ///     The generated string.
     /// </returns>
     protected override string GenerateNonNullSqlLiteral(object value)
-        => value is TimeSpan { Milliseconds: 0 } // Handle trailing decimal separator when no fractional seconds
+        => value is TimeSpan time && time.Ticks % TimeSpan.TicksPerSecond == 0
             ? string.Format(CultureInfo.InvariantCulture, _timeFormats[0], value)
             : string.Format(CultureInfo.InvariantCulture, SqlLiteralFormatString, value);
 }

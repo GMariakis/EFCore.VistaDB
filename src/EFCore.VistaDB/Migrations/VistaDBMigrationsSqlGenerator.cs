@@ -230,44 +230,92 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
         return result;
     }
 
-    // VistaDB rejects forward foreign-key references inside the same CREATE TABLE batch. Move every
-    // FK out of CreateTableOperation.ForeignKeys into its own AddForeignKeyOperation appended after
-    // all original operations. The base generator then emits each as a separate ALTER TABLE ... ADD
-    // CONSTRAINT statement, which VistaDB processes after the referenced tables already exist.
+    // Keep forward-reference deferral without modifying the caller's migration operations.
+    // Attach each FK as soon as both of its newly-created tables exist, before later renames,
+    // data operations or drops can change the table it is intended to constrain.
     private static IReadOnlyList<MigrationOperation> SplitForeignKeysFromCreateTables(
         IReadOnlyList<MigrationOperation> operations)
     {
-        List<AddForeignKeyOperation>? splitOut = null;
-
-        foreach (var op in operations)
+        var rewritten = new List<MigrationOperation>();
+        var deferred = new Dictionary<int, List<AddForeignKeyOperation>>();
+        for (var index = 0; index < operations.Count; index++)
         {
-            if (op is CreateTableOperation ct && ct.ForeignKeys.Count > 0)
+            if (operations[index] is CreateTableOperation table && table.ForeignKeys.Count > 0)
             {
-                splitOut ??= [];
-                foreach (var fk in ct.ForeignKeys)
+                var copy = new CreateTableOperation
                 {
-                    // Ensure the FK carries its parent table identity. The model differ typically
-                    // sets these already; the null-coalescing is defensive.
-                    fk.Schema ??= ct.Schema;
-                    fk.Table ??= ct.Name;
-                    splitOut.Add(fk);
-                }
+                    Name = table.Name,
+                    Schema = table.Schema,
+                    Comment = table.Comment,
+                    IsDestructiveChange = table.IsDestructiveChange,
+                    PrimaryKey = table.PrimaryKey
+                };
+                copy.AddAnnotations(table.GetAnnotations());
+                copy.Columns.AddRange(table.Columns);
+                copy.UniqueConstraints.AddRange(table.UniqueConstraints);
+                copy.CheckConstraints.AddRange(table.CheckConstraints);
+                rewritten.Add(copy);
 
-                ct.ForeignKeys.Clear();
+                foreach (var fk in table.ForeignKeys)
+                {
+                    var targetIndex = index;
+                    for (var candidate = index + 1; candidate < operations.Count; candidate++)
+                    {
+                        if (operations[candidate] is CreateTableOperation principal
+                            && string.Equals(principal.Name, fk.PrincipalTable, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(principal.Schema, fk.PrincipalSchema, StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetIndex = candidate;
+                            break;
+                        }
+                    }
+
+                    for (var intervening = index + 1; intervening < targetIndex; intervening++)
+                    {
+                        if (operations[intervening] is RenameTableOperation rename
+                                && string.Equals(rename.Name, table.Name, StringComparison.OrdinalIgnoreCase)
+                            || operations[intervening] is DropTableOperation drop
+                                && string.Equals(drop.Name, table.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new NotSupportedException(
+                                $"Foreign key '{fk.Name}' cannot be deferred: table '{table.Name}' is renamed or dropped before principal '{fk.PrincipalTable}' is created.");
+                        }
+                    }
+
+                    var foreignKey = new AddForeignKeyOperation
+                    {
+                        Name = fk.Name,
+                        Table = fk.Table ?? table.Name,
+                        Schema = fk.Schema ?? table.Schema,
+                        Columns = fk.Columns,
+                        PrincipalTable = fk.PrincipalTable,
+                        PrincipalSchema = fk.PrincipalSchema,
+                        PrincipalColumns = fk.PrincipalColumns,
+                        OnDelete = fk.OnDelete,
+                        OnUpdate = fk.OnUpdate,
+                        IsDestructiveChange = fk.IsDestructiveChange
+                    };
+                    foreignKey.AddAnnotations(fk.GetAnnotations());
+                    if (!deferred.TryGetValue(targetIndex, out var foreignKeys))
+                    {
+                        deferred[targetIndex] = foreignKeys = [];
+                    }
+                    foreignKeys.Add(foreignKey);
+                }
+            }
+            else
+            {
+                rewritten.Add(operations[index]);
+            }
+
+            if (deferred.Remove(index, out var ready))
+            {
+                rewritten.AddRange(ready);
             }
         }
 
-        if (splitOut is null)
-        {
-            return operations;
-        }
-
-        var rewritten = new List<MigrationOperation>(operations.Count + splitOut.Count);
-        rewritten.AddRange(operations);
-        rewritten.AddRange(splitOut);
         return rewritten;
     }
-
     /// <summary>
     ///     Emits a DDA-backed command into the SQL stream. Writes a sentinel comment via
     ///     <paramref name="builder" /> and registers <paramref name="ddaAction" /> against that sentinel; the
@@ -279,6 +327,12 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
         MigrationCommandListBuilder builder,
         Action<IVistaDBDdaAccessor> ddaAction)
     {
+        if ((Options & MigrationsSqlGenerationOptions.Script) != 0)
+        {
+            throw new NotSupportedException(
+                "This VistaDB migration operation requires the DDA API and cannot be exported as SQL. Apply it through Database.Migrate instead.");
+        }
+
         var id = (_ddaCounter++).ToString(CultureInfo.InvariantCulture);
         _pendingDda[id] = ddaAction;
         builder
@@ -425,7 +479,7 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
         var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
         builder
             .Append("IF SCHEMA_ID(")
-            .Append(stringTypeMapping.GenerateSqlLiteral(operation.Name))
+            .Append(stringTypeMapping.GenerateSqlLiteral(VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Name)))
             .Append(") IS NULL EXEC(")
             .Append(stringTypeMapping.GenerateSqlLiteral("CREATE SCHEMA " + Dependencies.SqlGenerationHelper.DelimitIdentifier(operation.Name)))
             .Append(")")
@@ -518,9 +572,9 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
             var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
             builder
                 .Append("EXEC sp_rename ")
-                .Append(stringTypeMapping.GenerateSqlLiteral(operation.Name))
+                .Append(stringTypeMapping.GenerateSqlLiteral(VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Name)))
                 .Append(", ")
-                .Append(stringTypeMapping.GenerateSqlLiteral(operation.NewName))
+                .Append(stringTypeMapping.GenerateSqlLiteral(VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.NewName)))
                 .AppendLine(Dependencies.SqlGenerationHelper.StatementTerminator)
                 .EndCommand();
         }
@@ -539,14 +593,14 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
             .Append("EXEC sp_rename ")
             .Append(stringTypeMapping.GenerateSqlLiteral(qualifiedName))
             .Append(", ")
-            .Append(stringTypeMapping.GenerateSqlLiteral(operation.NewName))
+            .Append(stringTypeMapping.GenerateSqlLiteral(VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.NewName)))
             .Append(", N'COLUMN'")
             .AppendLine(Dependencies.SqlGenerationHelper.StatementTerminator)
             .EndCommand();
         */
-        var table = operation.Table;
-        var oldName = operation.Name;
-        var newName = operation.NewName;
+        var table = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Table);
+        var oldName = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Name);
+        var newName = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.NewName);
         EndDdaCommand(
             builder,
             accessor =>
@@ -569,19 +623,18 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
     ///     <para>
     ///         Our workaround: when EF Core asks for <c>CREATE UNIQUE INDEX</c> on an index whose model-side
     ///         column metadata reports any indexed column as nullable, emit a <b>non-unique</b> index instead.
-    ///         We lose the engine-level uniqueness enforcement for that case, but EF Core's change tracker still
-    ///         validates the unique constraint client-side via the model. The alternative — failing the seed —
-    ///         would break every TPH optional-1-to-1 navigation (e.g., <c>OptionalSingle1Derived</c> in
-    ///         <c>GraphUpdatesTestBase</c>).
+    ///         This loses database uniqueness enforcement for non-null values as well. EF relationship
+    ///         tracking does not replace a database unique index, especially across contexts or external
+    ///         writers. The workaround preserves the optional-relationship seeding behavior exercised by
+    ///         <c>GraphUpdatesTestBase</c>; changing it requires a native VDB alternative with both semantics.
     ///     </para>
     /// </remarks>
     protected override void Generate(CreateIndexOperation operation, IModel? model, MigrationCommandListBuilder builder, bool terminate = true)
     {
         if (operation.IsUnique && AnyIndexedColumnIsNullable(operation, model))
         {
-            // Clone the operation with IsUnique = false, leave everything else untouched.
-            // CreateIndexOperation.IsUnique has a public setter, so we mutate in place then
-            // restore — avoids a noisy clone, and the operation is not used past base.Generate.
+            // Temporarily relax uniqueness for SQL generation, restoring the caller's operation
+            // even when generation throws.
             operation.IsUnique = false;
             try
             {
@@ -634,7 +687,7 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
             .Append("EXEC sp_rename ")
             .Append(stringTypeMapping.GenerateSqlLiteral(qualifiedName))
             .Append(", ")
-            .Append(stringTypeMapping.GenerateSqlLiteral(operation.NewName))
+            .Append(stringTypeMapping.GenerateSqlLiteral(VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.NewName)))
             .Append(", N'INDEX'")
             .AppendLine(Dependencies.SqlGenerationHelper.StatementTerminator)
             .EndCommand();
@@ -645,9 +698,9 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
                 "VistaDB cannot rename an index without knowing the table it belongs to. RenameIndexOperation.Table must be set.");
         }
 
-        var table = operation.Table;
-        var oldName = operation.Name;
-        var newName = operation.NewName;
+        var table = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Table);
+        var oldName = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Name);
+        var newName = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.NewName);
         EndDdaCommand(
             builder,
             accessor =>
@@ -680,14 +733,29 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
                 VistaDBStrings.ComputedColumnsNotSupported(operation.Name, operation.Table));
         }
 
-        var table = operation.Table;
-        var columnName = operation.Name;
+        var table = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Table);
+        var columnName = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Name);
         var columnType = operation.ColumnType
             ?? GetColumnType(operation.Schema, operation.Table, operation.Name, operation, model);
         var isNullable = operation.IsNullable;
         var defaultValueSql = operation.DefaultValueSql;
         var defaultValue = operation.DefaultValue;
         var maxLength = operation.MaxLength;
+        if (maxLength is null)
+        {
+            var openParen = columnType.IndexOf('(');
+            var closeParen = columnType.IndexOf(')');
+            if (openParen >= 0 && closeParen > openParen
+                && int.TryParse(columnType.AsSpan(openParen + 1, closeParen - openParen - 1), out var storeLength)
+                && storeLength > 0
+                && columnType[..openParen].Trim().ToLowerInvariant() is "nvarchar" or "varchar" or "nchar" or "char" or "binary" or "varbinary")
+            {
+                maxLength = storeLength;
+            }
+        }
+        var vistaDbType = TryParseVistaDbType(columnType);
+        var defaultExpression = defaultValueSql
+            ?? (defaultValue is null ? null : RenderDdlDefault(defaultValue, columnType));
 
         EndDdaCommand(
             builder,
@@ -696,7 +764,7 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
                 using var database = accessor.OpenDatabase();
                 using var tableSchema = database.TableSchema(table);
 
-                // Try to find the existing column by name and alter it; if absent, fall back to AddColumn.
+                // Alter an existing column; an absent column is a schema mismatch, not an add.
                 IVistaDBColumnAttributes? existing = null;
                 for (var i = 0; i < tableSchema.ColumnCount; i++)
                 {
@@ -708,25 +776,23 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
                     }
                 }
 
-                var vistaDbType = TryParseVistaDbType(columnType);
                 if (existing is null)
                 {
-                    tableSchema.AddColumn(columnName, vistaDbType, maxLength ?? 0);
-                }
-                else
-                {
-                    tableSchema.AlterColumnType(columnName, vistaDbType, maxLength ?? 0);
+                    throw new InvalidOperationException($"Cannot alter missing VistaDB column '{table}.{columnName}'.");
                 }
 
-                tableSchema.DefineColumnAttributes(columnName, isNullable, false, false, false, null);
+                tableSchema.AlterColumnType(columnName, vistaDbType, maxLength ?? 0);
+                tableSchema.DefineColumnAttributes(
+                    columnName, isNullable, existing.ReadOnly, existing.Encrypted, existing.Packed,
+                    existing.Caption, operation.Comment ?? existing.Description);
 
-                if (defaultValueSql is not null)
+                if (tableSchema.DefaultValues.ContainsKey(columnName))
                 {
-                    tableSchema.DefineDefaultValue(columnName, defaultValueSql, false, null);
+                    tableSchema.DropDefaultValue(columnName);
                 }
-                else if (defaultValue is not null)
+                if (defaultExpression is not null)
                 {
-                    tableSchema.DefineDefaultValue(columnName, RenderDdlDefault(defaultValue), false, null);
+                    tableSchema.DefineDefaultValue(columnName, defaultExpression, false, null);
                 }
 
                 database.AlterTable(table, tableSchema);
@@ -741,8 +807,8 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
         /*
         base.Generate(operation, model, builder);
         */
-        var table = operation.Table;
-        var name = operation.Name;
+        var table = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Table);
+        var name = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Name);
         var sql = operation.Sql;
         EndDdaCommand(
             builder,
@@ -764,8 +830,8 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
         /*
         base.Generate(operation, model, builder);
         */
-        var table = operation.Table;
-        var name = operation.Name;
+        var table = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Table);
+        var name = VistaDBSqlGenerationHelper.SanitizeForVistaDB(operation.Name);
         EndDdaCommand(
             builder,
             accessor =>
@@ -824,13 +890,20 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
             throw new NotSupportedException(VistaDBStrings.ComputedColumnsNotSupported(operation.Name, operation.Table));
         }
 
-        if (IsIdentity(operation))
+        var defaultValue = operation.DefaultValue;
+        try
         {
-            // Strip DefaultValue when IDENTITY is set — VistaDB, like SqlServer, can't have both.
-            operation.DefaultValue = null;
+            if (IsIdentity(operation))
+            {
+                // Restore the caller's operation after excluding an incompatible identity default.
+                operation.DefaultValue = null;
+            }
+            base.Generate(operation, model, builder, terminate);
         }
-
-        base.Generate(operation, model, builder, terminate);
+        finally
+        {
+            operation.DefaultValue = defaultValue;
+        }
     }
 
     /// <inheritdoc />
@@ -914,6 +987,12 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
             _ => defaultValue.ToString() ?? string.Empty,
         };
 
+    private string RenderDdlDefault(object defaultValue, string columnType)
+        => defaultValue is bool flag
+            ? flag ? "1" : "0"
+            : (Dependencies.TypeMappingSource.FindMapping(defaultValue.GetType(), columnType)
+                ?? Dependencies.TypeMappingSource.GetMappingForValue(defaultValue)).GenerateSqlLiteral(defaultValue);
+
     /// <summary>
     ///     Determines whether <paramref name="operation" /> is annotated for VistaDB IDENTITY.
     /// </summary>
@@ -943,6 +1022,22 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
         var seedObj = operation[VistaDBAnnotationNames.IdentitySeed];
         var incrementObj = operation[VistaDBAnnotationNames.IdentityIncrement];
 
+        // Relational column annotations (and scaffolded migrations) carry the combined
+        // identity annotation. Retain support for the separate annotations on hand-built operations.
+        if (operation[VistaDBAnnotationNames.Identity] is string identity)
+        {
+            var parts = identity.Split(',');
+            if (parts.Length != 2
+                || !long.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var identitySeed)
+                || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var identityIncrement))
+            {
+                throw new InvalidOperationException($"Invalid VistaDB identity annotation '{identity}'. Expected 'seed, increment'.");
+            }
+
+            seedObj ??= identitySeed;
+            incrementObj ??= identityIncrement;
+        }
+
         long seed = seedObj switch
         {
             long l => l,
@@ -954,7 +1049,7 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
         int increment = incrementObj switch
         {
             int i => i,
-            long l => (int)l,
+            long l => checked((int)l),
             string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => 1
         };
@@ -988,9 +1083,10 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
             "smallmoney" => VistaDBType.SmallMoney,
             "datetime" => VistaDBType.DateTime,
             "smalldatetime" => VistaDBType.SmallDateTime,
-            "date" => VistaDBType.DateTime,
-            "time" => VistaDBType.DateTime,
-            "datetimeoffset" => VistaDBType.DateTime,
+            "date" => VistaDBType.Date,
+            "time" => VistaDBType.Time,
+            "datetime2" => VistaDBType.DateTime2,
+            "datetimeoffset" => VistaDBType.DateTimeOffset,
             "uniqueidentifier" => VistaDBType.UniqueIdentifier,
             "image" or "varbinary" or "binary" => VistaDBType.VarBinary,
             "text" => VistaDBType.Text,
@@ -1000,7 +1096,7 @@ public class VistaDBMigrationsSqlGenerator : MigrationsSqlGenerator
             "nchar" => VistaDBType.NChar,
             "nvarchar" => VistaDBType.NVarChar,
             "timestamp" or "rowversion" => VistaDBType.Timestamp,
-            _ => VistaDBType.NVarChar
+            _ => throw new NotSupportedException($"VistaDB column type '{columnType}' cannot be altered through DDA.")
         };
     }
 

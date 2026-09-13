@@ -105,7 +105,7 @@ public class VistaDBDdaAccessor : IVistaDBDdaAccessor
     public virtual void WithTable(string tableName, Action<IVistaDBTable> action, bool readOnly = false, bool exclusive = false)
     {
         using var database = OpenDatabase(readOnly);
-        using var table = database.OpenTable(tableName, exclusive, readOnly);
+        using var table = database.OpenTable(VistaDBSqlGenerationHelper.SanitizeForVistaDB(tableName), exclusive, readOnly);
         action(table);
     }
 
@@ -127,7 +127,7 @@ public class VistaDBDdaAccessor : IVistaDBDdaAccessor
             "VistaDB connection has no 'Data Source' (database file path) set.");
     }
 
-    private static string? ExtractPassword(string? connectionString)
+    internal static string? ExtractPassword(string? connectionString)
     {
         if (string.IsNullOrEmpty(connectionString))
         {

@@ -7,201 +7,101 @@ using Microsoft.EntityFrameworkCore.VistaDB.Storage.Internal;
 namespace Microsoft.EntityFrameworkCore.VistaDB.Migrations.Internal;
 
 /// <summary>
-///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
-///     the same compatibility standards as public APIs. It may be changed or removed without notice in
-///     any release. You should only use it directly in your code with extreme caution and knowing that
-///     doing so can result in application failures when updating to a new Entity Framework Core release.
+///     VistaDB migration history uses the documented [database schema] catalog and conditional SQL.
+///     This is an internal EF Core provider API.
 /// </summary>
-/// <remarks>
-///     <para>
-///         Mirrors <c>SqlServerHistoryRepository</c>. Key differences:
-///     </para>
-///     <list type="bullet">
-///         <item>
-///             <description>
-///                 VistaDB has no <c>OBJECT_ID()</c> / <c>sys.tables</c>, and it does not ship the
-///                 SQL Server-style <c>INFORMATION_SCHEMA</c> views either — querying them fails with
-///                 error 627 ("Invalid schema name. DBO must be used instead of: INFORMATION_SCHEMA").
-///                 Existence is therefore probed through the DDA surface
-///                 (<see cref="IVistaDBDdaAccessor" />), matching how
-///                 <c>VistaDBDatabaseModelFactory</c> enumerates tables during scaffolding.
-///             </description>
-///         </item>
-///         <item>
-///             <description>
-///                 VistaDB has no <c>sp_getapplock</c>/<c>sp_releaseapplock</c>.
-///                 <see cref="AcquireDatabaseLock" /> returns an inert
-///                 <see cref="VistaDBMigrationDatabaseLock" />; single-process ownership of the <c>.vdb6</c>
-///                 file is enforced by the VistaDB engine itself.
-///             </description>
-///         </item>
-///         <item>
-///             <description>
-///                 VistaDB has no <c>IF ... BEGIN ... END</c> idempotent batch primitive — the
-///                 <c>GetBeginIf...</c>/<c>GetEndIfScript</c> overrides emit comment markers, and the
-///                 per-migration scripts must therefore be applied in order.
-///             </description>
-///         </item>
-///     </list>
-///     <para>
-///         Original SqlServer body is preserved in a marker block in the source for future revival.
-///     </para>
-/// </remarks>
 public class VistaDBHistoryRepository : HistoryRepository
 {
-    // VistaDB: no analog — see <remarks>. Original SqlServer body preserved below.
-    /*
-    // OBJECT_ID + sp_getapplock variant
-    protected override string ExistsSql => "SELECT OBJECT_ID(...)" + terminator;
-    public override IMigrationsDatabaseLock AcquireDatabaseLock() { sp_getapplock ... }
-    public override string GetCreateIfNotExistsScript()
-    {
-        var builder = new StringBuilder()
-            .Append("IF OBJECT_ID(...) IS NULL")
-            .AppendLine("BEGIN")
-            .AppendLines("    " + GetCreateScript())
-            .Append("END");
-        return builder.ToString();
-    }
-    */
-
-    /// <summary>
-    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
-    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
-    ///     any release. You should only use it directly in your code with extreme caution and knowing that
-    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
-    /// </summary>
     private readonly IVistaDBDdaAccessor _ddaAccessor;
 
     public VistaDBHistoryRepository(HistoryRepositoryDependencies dependencies, IVistaDBDdaAccessor ddaAccessor)
         : base(dependencies)
-    {
-        _ddaAccessor = ddaAccessor;
-    }
+        => _ddaAccessor = ddaAccessor;
 
-    /// <summary>
-    ///     Never executed — <see cref="Exists" /> is overridden to use DDA because VistaDB has no
-    ///     queryable catalog views. Kept because the base class requires the member.
-    /// </summary>
+    // The public existence methods also handle a missing database file. The legacy protected
+    // member remains unsupported; neither existence method delegates to the base implementation.
     protected override string ExistsSql
-        => throw new NotSupportedException(
-            "VistaDB has no INFORMATION_SCHEMA/sys catalog views; history-table existence is probed via DDA.");
+        => throw new NotSupportedException("Use the VistaDB history Exists or ExistsAsync implementation.");
 
-    /// <inheritdoc />
     protected override bool InterpretExistsResult(object? value)
-        => value is not null && value != DBNull.Value && Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture) > 0;
+        => value is not null && value != DBNull.Value
+            && Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture) > 0;
 
-    /// <summary>
-    ///     Probes for the migrations-history table. VistaDB rejects <c>INFORMATION_SCHEMA</c>
-    ///     (error 627) and DDA's <c>GetTableNames()</c> omits <c>__</c>-prefixed tables (it is meant
-    ///     to list user tables, which is what the scaffolder wants), so neither can answer this.
-    ///     Instead select from the table directly: success means it exists, and any engine error
-    ///     means it does not. A missing database file short-circuits to "not there yet".
-    /// </summary>
-    public override bool Exists()
+    private string CatalogPredicate
+        => "[typeid] = 1 AND [name] = "
+            + Dependencies.TypeMappingSource.GetMapping(typeof(string)).GenerateSqlLiteral(
+                VistaDBSqlGenerationHelper.SanitizeForVistaDB(TableName));
+
+    private string CatalogExistsSql
+        => "SELECT COUNT(*) FROM [database schema] WHERE " + CatalogPredicate
+            + Dependencies.SqlGenerationHelper.StatementTerminator;
+
+    private bool DatabaseFileExists()
     {
-        string path = _ddaAccessor.GetDatabaseFilePath();
-        if (string.IsNullOrEmpty(path) || !File.Exists(path))
-        {
-            return false;
-        }
-
-        var sql = new StringBuilder()
-            .Append("SELECT COUNT(*) FROM ")
-            .Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(TableName, TableSchema))
-            .Append(Dependencies.SqlGenerationHelper.StatementTerminator)
-            .ToString();
-
-        try
-        {
-            var command = Dependencies.RawSqlCommandBuilder.Build(sql);
-            command.ExecuteScalar(
-                new RelationalCommandParameterObject(
-                    Dependencies.Connection,
-                    parameterValues: null,
-                    readerColumns: null,
-                    context: Dependencies.CurrentContext.Context,
-                    logger: Dependencies.CommandLogger));
-            return true;
-        }
-        catch (Exception)
-        {
-            // VistaDB raises rather than returning an empty result when the table is absent.
-            return false;
-        }
+        var path = _ddaAccessor.GetDatabaseFilePath();
+        return !string.IsNullOrEmpty(path) && File.Exists(path);
     }
 
-    /// <inheritdoc />
-    public override Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
+    private RelationalCommandParameterObject CommandParameters
+        => new(Dependencies.Connection, null, null, Dependencies.CurrentContext.Context, Dependencies.CommandLogger);
+
+    public override bool Exists()
+        => DatabaseFileExists()
+            && InterpretExistsResult(Dependencies.RawSqlCommandBuilder.Build(CatalogExistsSql).ExecuteScalar(CommandParameters));
+
+    public override async Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(Exists());
+        return DatabaseFileExists()
+            && InterpretExistsResult(await Dependencies.RawSqlCommandBuilder.Build(CatalogExistsSql)
+                .ExecuteScalarAsync(CommandParameters, cancellationToken).ConfigureAwait(false));
     }
 
-    /// <inheritdoc />
     public override LockReleaseBehavior LockReleaseBehavior
-        => LockReleaseBehavior.Connection;
+        => LockReleaseBehavior.Explicit;
 
-    /// <inheritdoc />
     public override IMigrationsDatabaseLock AcquireDatabaseLock()
     {
         Dependencies.MigrationsLogger.AcquiringMigrationLock();
-        return new VistaDBMigrationDatabaseLock(this);
+        return VistaDBMigrationDatabaseLock.Acquire(this, _ddaAccessor.GetDatabaseFilePath(), Dependencies.Connection.CommandTimeout ?? 30, async: false).GetAwaiter().GetResult();
     }
 
-    /// <inheritdoc />
-    public override Task<IMigrationsDatabaseLock> AcquireDatabaseLockAsync(CancellationToken cancellationToken = default)
+    public override async Task<IMigrationsDatabaseLock> AcquireDatabaseLockAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Dependencies.MigrationsLogger.AcquiringMigrationLock();
-        return Task.FromResult<IMigrationsDatabaseLock>(new VistaDBMigrationDatabaseLock(this));
+        return await VistaDBMigrationDatabaseLock.Acquire(this, _ddaAccessor.GetDatabaseFilePath(), Dependencies.Connection.CommandTimeout ?? 30, async: true, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <inheritdoc />
     public override string GetCreateIfNotExistsScript()
-    {
-        // VistaDB has no procedural IF/BEGIN/END and no IF NOT EXISTS, so the condition has to be
-        // evaluated here rather than expressed in SQL. EF's migrator calls this without checking
-        // Exists() first, so emitting an unconditional CREATE makes every subsequent startup fail
-        // with "Duplicate table name". Decide now: create only when the table is genuinely absent.
-        if (Exists())
-        {
-            // An empty script is not a parseable statement for the engine, so emit a harmless no-op.
-            return "SELECT 1" + Dependencies.SqlGenerationHelper.StatementTerminator;
-        }
+        => new StringBuilder()
+            .AppendLine("-- VistaDB: create of history table")
+            .Append("IF NOT EXISTS (SELECT 1 FROM [database schema] WHERE ").Append(CatalogPredicate).AppendLine(")")
+            .AppendLine("BEGIN")
+            .AppendLine(GetCreateScript())
+            .Append("END").AppendLine(Dependencies.SqlGenerationHelper.StatementTerminator)
+            .ToString();
 
-        var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
-        var builder = new StringBuilder();
-        builder.Append("-- VistaDB: create of ")
-            .Append(stringTypeMapping.GenerateSqlLiteral(TableName))
-            .AppendLine(" history table")
-            .AppendLine(GetCreateScript());
-
-        return builder.ToString();
-    }
-
-    /// <inheritdoc />
     public override string GetBeginIfNotExistsScript(string migrationId)
-    {
-        // VistaDB has no IF/BEGIN/END SQL. Emit a comment marker; the executor still runs the body which is
-        // expected to be idempotent (CREATE TABLE will fail loud, which the migration tool surfaces).
-        var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
-        return new StringBuilder()
-            .Append("-- VistaDB: BEGIN IF NOT EXISTS migration ")
-            .Append(stringTypeMapping.GenerateSqlLiteral(migrationId))
-            .ToString();
-    }
+        => GetBeginIfScript(migrationId, notExists: true);
 
-    /// <inheritdoc />
     public override string GetBeginIfExistsScript(string migrationId)
+        => GetBeginIfScript(migrationId, notExists: false);
+
+    private string GetBeginIfScript(string migrationId, bool notExists)
     {
-        var stringTypeMapping = Dependencies.TypeMappingSource.GetMapping(typeof(string));
+        var condition = notExists ? "NOT EXISTS" : "EXISTS";
         return new StringBuilder()
-            .Append("-- VistaDB: BEGIN IF EXISTS migration ")
-            .Append(stringTypeMapping.GenerateSqlLiteral(migrationId))
+            .Append("-- VistaDB: BEGIN IF ").Append(condition).AppendLine(" migration")
+            .Append("IF ").Append(condition).Append(" (SELECT 1 FROM ")
+            .Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(TableName, TableSchema))
+            .Append(" WHERE ").Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(MigrationIdColumnName))
+            .Append(" = ").Append(Dependencies.TypeMappingSource.GetMapping(typeof(string)).GenerateSqlLiteral(migrationId))
+            .AppendLine(")")
+            .AppendLine("BEGIN")
             .ToString();
     }
 
-    /// <inheritdoc />
     public override string GetEndIfScript()
-        => "-- VistaDB: END IF";
+        => "END" + Dependencies.SqlGenerationHelper.StatementTerminator + Environment.NewLine + "-- VistaDB: END IF";
 }

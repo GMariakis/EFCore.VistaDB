@@ -246,12 +246,7 @@ public class VistaDBAnnotationProvider : RelationalAnnotationProvider
         var table = StoreObjectIdentifier.Table(column.Table.Name, column.Table.Schema);
         var identityProperty = column.PropertyMappings
             .Select(m => m.Property)
-            .FirstOrDefault(p =>
-            {
-                var strategyAnnotation = p.FindAnnotation(VistaDBAnnotationNames.ValueGenerationStrategy);
-                return strategyAnnotation?.Value is VistaDBValueGenerationStrategy strategy
-                    && strategy == VistaDBValueGenerationStrategy.IdentityColumn;
-            });
+            .FirstOrDefault(p => p.GetValueGenerationStrategy(table) == VistaDBValueGenerationStrategy.IdentityColumn);
         if (identityProperty != null)
         {
             var seed = identityProperty.FindAnnotation(VistaDBAnnotationNames.IdentitySeed)?.Value as long?;

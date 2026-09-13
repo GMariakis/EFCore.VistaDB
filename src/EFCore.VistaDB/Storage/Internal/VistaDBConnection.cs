@@ -46,8 +46,15 @@ public class VistaDBConnection : RelationalConnection, IVistaDBConnection
     public static string AugmentConnectionStringForTesting(string connectionString)
         => AugmentConnectionString(connectionString);
 
-    private static string AugmentConnectionString(string connectionString)
+    internal static string AugmentConnectionString(string connectionString)
     {
+        // EF creates an unconfigured connection for interception and configures it later.
+        // Preserve that empty state; there is no database whose open mode can be chosen yet.
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return connectionString;
+        }
+
         // Ask a plain DbConnectionStringBuilder whether the caller named a mode, not VistaDB's own.
         // VistaDBConnectionStringBuilder pre-populates its strongly-typed keywords, so ContainsKey
         // returns true for "Open Mode" on a string that never mentioned it — which silently skipped
@@ -69,7 +76,7 @@ public class VistaDBConnection : RelationalConnection, IVistaDBConnection
     ///     Indicates whether the store connection supports ambient transactions.
     /// </summary>
     protected override bool SupportsAmbientTransactions
-        => true;
+        => false;
 
     // VistaDB: no analog — VistaDB has no "master" database; each database is a self-contained .vdb6 file.
     // SqlServer's Application Name connection-string injection and MARS detection also do not apply.

@@ -336,23 +336,24 @@ public class VistaDBStringMethodTranslator : IMethodCallTranslator
         if (searchExpression is SqlConstantExpression { Value: "" })
         {
             return _sqlExpressionFactory.Case(
-                [new CaseWhenClause(_sqlExpressionFactory.IsNotNull(instance), _sqlExpressionFactory.Constant(0))],
+                [new CaseWhenClause(_sqlExpressionFactory.IsNotNull(instance), startIndex ?? _sqlExpressionFactory.Constant(0))],
                 elseResult: null
             );
         }
 
-        var offsetExpression = searchExpression is SqlConstantExpression
-            ? _sqlExpressionFactory.Constant(1)
-            : _sqlExpressionFactory.Case(
+        var result = _sqlExpressionFactory.Subtract(charIndexExpression, _sqlExpressionFactory.Constant(1));
+        return searchExpression is not SqlConstantExpression && searchExpression.Type == typeof(string)
+            ? _sqlExpressionFactory.Case(
                 [
                     new CaseWhenClause(
-                        _sqlExpressionFactory.Equal(
-                            searchExpression,
-                            _sqlExpressionFactory.Constant(string.Empty, stringTypeMapping)),
-                        _sqlExpressionFactory.Constant(0))
+                        _sqlExpressionFactory.AndAlso(
+                            _sqlExpressionFactory.IsNotNull(instance),
+                            _sqlExpressionFactory.Equal(
+                                searchExpression,
+                                _sqlExpressionFactory.Constant(string.Empty, stringTypeMapping))),
+                        startIndex ?? _sqlExpressionFactory.Constant(0))
                 ],
-                _sqlExpressionFactory.Constant(1));
-
-        return _sqlExpressionFactory.Subtract(charIndexExpression, offsetExpression);
+                result)
+            : result;
     }
 }

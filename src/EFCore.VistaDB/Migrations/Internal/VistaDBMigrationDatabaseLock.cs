@@ -4,75 +4,74 @@
 namespace Microsoft.EntityFrameworkCore.VistaDB.Migrations.Internal;
 
 /// <summary>
-///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
-///     the same compatibility standards as public APIs. It may be changed or removed without notice in
-///     any release. You should only use it directly in your code with extreme caution and knowing that
-///     doing so can result in application failures when updating to a new Entity Framework Core release.
+///     Serializes cooperating EF migrators through an exclusively opened sidecar file.
+///     Ordinary VistaDB connections and external editors retain their normal engine locking.
 /// </summary>
 /// <remarks>
-///     <para>
-///         VistaDB: no analog — VistaDB is a file-based engine with no <c>sp_getapplock</c>/
-///         <c>sp_releaseapplock</c> concept. The migration pipeline only needs
-///         <see cref="IMigrationsDatabaseLock" /> as an <see cref="IDisposable" /> handle, so this
-///         implementation is an inert no-op that satisfies the contract. Single-process file ownership is
-///         enforced by VistaDB itself when the database file is opened.
-///     </para>
-///     <para>
-///         Original SqlServer body is preserved verbatim in a marker block in the source for future revival
-///         if VistaDB ever exposes a lock primitive.
-///     </para>
+///     The sidecar remains on disk after release: deleting it can let two waiters acquire
+///     different file objects. Ownership is the open OS handle, not the existence of the file,
+///     so process termination releases the lock without stale-owner cleanup.
 /// </remarks>
-public class VistaDBMigrationDatabaseLock : IMigrationsDatabaseLock
+public sealed class VistaDBMigrationDatabaseLock : IMigrationsDatabaseLock
 {
-    // VistaDB: no analog — see <remarks> on the class. Original SqlServer body preserved below.
-    /*
-    public class SqlServerMigrationDatabaseLock(
-        IRelationalCommand releaseLockCommand,
-        RelationalCommandParameterObject relationalCommandParameters,
-        IHistoryRepository historyRepository,
+    private FileStream? _handle;
+
+    private VistaDBMigrationDatabaseLock(IHistoryRepository historyRepository, FileStream handle)
+    {
+        HistoryRepository = historyRepository;
+        _handle = handle;
+    }
+
+    public IHistoryRepository HistoryRepository { get; }
+
+    internal static async ValueTask<VistaDBMigrationDatabaseLock> Acquire(
+        IHistoryRepository historyRepository, string databasePath, int timeoutSeconds, bool async,
         CancellationToken cancellationToken = default)
-        : IMigrationsDatabaseLock
     {
-        public virtual IHistoryRepository HistoryRepository
-            => historyRepository;
+        var databaseFile = new FileInfo(Path.GetFullPath(databasePath));
+        // Follow a database-file symlink. Parent-directory junctions are handled by the OS
+        // when the adjacent lock file is opened. Hard-link aliases require a shared canonical path.
+        var canonicalPath = databaseFile.LinkTarget is null
+            ? databaseFile.FullName
+            : databaseFile.ResolveLinkTarget(returnFinalTarget: true)!.FullName;
+        var lockPath = canonicalPath + ".efcore-migrations.lock";
+        var elapsed = Stopwatch.StartNew();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new VistaDBMigrationDatabaseLock(
+                    historyRepository, new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+            }
+            catch (IOException exception) when ((exception.HResult & 0xffff) is 32 or 33 or 11)
+            {
+                // Retry sharing/locking contention, not path, permission or disk failures.
+                if (timeoutSeconds > 0 && elapsed.Elapsed >= TimeSpan.FromSeconds(timeoutSeconds))
+                {
+                    throw new TimeoutException($"Timed out acquiring the VistaDB migration lock for '{canonicalPath}'.", exception);
+                }
+            }
 
-        public void Dispose()
-            => releaseLockCommand.ExecuteScalar(relationalCommandParameters);
-
-        public async ValueTask DisposeAsync()
-            => await releaseLockCommand.ExecuteScalarAsync(relationalCommandParameters, cancellationToken).ConfigureAwait(false);
+            if (async)
+            {
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                Thread.Sleep(50);
+            }
+        }
     }
-    */
 
-    private readonly IHistoryRepository _historyRepository;
-
-    /// <summary>
-    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
-    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
-    ///     any release. You should only use it directly in your code with extreme caution and knowing that
-    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
-    /// </summary>
-    public VistaDBMigrationDatabaseLock(IHistoryRepository historyRepository)
-    {
-        _historyRepository = historyRepository;
-    }
-
-    /// <summary>
-    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
-    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
-    ///     any release. You should only use it directly in your code with extreme caution and knowing that
-    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
-    /// </summary>
-    public virtual IHistoryRepository HistoryRepository
-        => _historyRepository;
-
-    /// <inheritdoc />
     public void Dispose()
-    {
-        // No-op: see remarks.
-    }
+        => Interlocked.Exchange(ref _handle, null)?.Dispose();
 
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
-        => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _handle, null) is { } handle)
+        {
+            await handle.DisposeAsync().ConfigureAwait(false);
+        }
+    }
 }

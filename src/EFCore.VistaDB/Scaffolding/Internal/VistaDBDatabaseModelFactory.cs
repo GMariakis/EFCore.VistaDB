@@ -75,20 +75,8 @@ public class VistaDBDatabaseModelFactory : DatabaseModelFactory
     /// </summary>
     public override DatabaseModel Create(string connectionString, DatabaseModelFactoryOptions options)
     {
-        // Default to MultiProcessReadWrite so the same file can be opened concurrently by other
-        // DbContext instances (or other processes) without forcing scaffold-time exclusivity. Earlier
-        // attempts forced SingleProcessReadWrite here to align with what VistaDBClient was registering
-        // in the lock-manager — that was the wrong fix. The real win is that scaffolding does not
-        // need a SQL connection at all now that table/column/index/FK enumeration goes through DDA
-        // (see Create(DbConnection, options) below: the SQL connection is never opened in the scaffold
-        // path). MultiProcessReadWrite for the DDA handle therefore has no peer to conflict with.
-        var builder = new global::VistaDB.Provider.VistaDBConnectionStringBuilder(connectionString);
-        if (!builder.ContainsKey("Open Mode"))
-        {
-            builder.OpenMode = global::VistaDB.VistaDBDatabaseOpenMode.MultiProcessReadWrite;
-        }
-
-        using var connection = new VistaDBClient(builder.ConnectionString);
+        using var connection = new VistaDBClient(
+            Storage.Internal.VistaDBConnection.AugmentConnectionString(connectionString));
         return Create(connection, options);
     }
 
@@ -134,7 +122,8 @@ public class VistaDBDatabaseModelFactory : DatabaseModelFactory
         }
         */
 
-        using var dda = OpenDda(connection);
+        using var ddaRoot = VistaDBEngine.Connections.OpenDDA();
+        using var dda = OpenDda(connection, ddaRoot);
 
         GetTables(connection, dda, databaseModel, requestedTableNames);
 
@@ -205,52 +194,22 @@ public class VistaDBDatabaseModelFactory : DatabaseModelFactory
         return lastDot < 0 ? input : input[(lastDot + 1)..];
     }
 
-    private static IVistaDBDatabase OpenDda(DbConnection connection)
+    private static IVistaDBDatabase OpenDda(DbConnection connection, IVistaDBDDA ddaRoot)
     {
-        var dataSource = connection.DataSource;
-        if (string.IsNullOrEmpty(dataSource))
-        {
-            var csb = new DbConnectionStringBuilder { ConnectionString = connection.ConnectionString };
-            if (csb.TryGetValue("Data Source", out var ds) && ds is string s)
-            {
-                dataSource = s;
-            }
-        }
-
+        var dataSource = ExtractDataSource(connection);
         if (string.IsNullOrEmpty(dataSource))
         {
             throw new InvalidOperationException(
                 "VistaDB scaffolder: the connection has no 'Data Source' (database file path).");
         }
 
-        string? password = null;
-        try
-        {
-            var csb = new DbConnectionStringBuilder { ConnectionString = connection.ConnectionString };
-            if (csb.TryGetValue("Password", out var pwd) && pwd is string s && s.Length > 0)
-            {
-                password = s;
-            }
-        }
-        catch
-        {
-            // Ignored — fall through with no password.
-        }
-
-        var ddaRoot = global::VistaDB.DDA.VistaDBEngine.Connections.OpenDDA();
-        // VistaDB allows the DDA and the ADO.NET path to share the same file within a single process.
-        // SharedReadOnly works when no other handle exists; SingleProcessReadWrite conflicts with the
-        // ADO.NET connection's SingleProcessReadWrite and blocks INFORMATION_SCHEMA. Use
-        // MultiProcessReadWrite which allows concurrent access including with INFORMATION_SCHEMA queries.
-        // The "another process" error that MultiProcessReadWrite raised earlier was from the EnsureCreated
-        // DDA handle — now that the test creates the DB differently, MultiProcessReadWrite should succeed.
-        // MultiProcessReadWrite: scaffolding doesn't open a SQL connection alongside this (Create()
-        // above is now DDA-only) so there is no in-process peer mode to conflict with. Cross-process
-        // sharing is preserved — another instance of the same .vdb6 opened by a runtime DbContext
-        // elsewhere remains compatible.
-        return ddaRoot.OpenDatabase(dataSource, global::VistaDB.VistaDBDatabaseOpenMode.MultiProcessReadWrite, password);
+        // String-created connections use the provider default; supplied connections retain
+        // their locking family. Scaffolding only reads metadata and owns both DDA handles.
+        return ddaRoot.OpenDatabase(
+            dataSource,
+            Storage.Internal.VistaDBOpenModes.ForDda(connection.ConnectionString, readOnly: true),
+            Storage.Internal.VistaDBDdaAccessor.ExtractPassword(connection.ConnectionString));
     }
-
     private void GetTables(
         DbConnection connection,
         IVistaDBDatabase dda,
@@ -644,15 +603,8 @@ public class VistaDBDatabaseModelFactory : DatabaseModelFactory
                 return $"{typeName}(max)";
             }
 
-            if (typeName is "nvarchar" or "nchar")
-            {
-                var charLen = maxLength / 2;
-                if (charLen > 0)
-                {
-                    return $"{typeName}({charLen})";
-                }
-            }
-
+            // DDA reports the declared character count for Unicode columns, not a byte
+            // count as SQL Server's catalog does. Dividing it halves the scaffolded length.
             return $"{typeName}({maxLength})";
         }
 

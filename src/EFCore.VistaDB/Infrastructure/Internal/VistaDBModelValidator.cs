@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Microsoft.EntityFrameworkCore.VistaDB.Internal;
+using Microsoft.EntityFrameworkCore.VistaDB.Storage.Internal;
 
 namespace Microsoft.EntityFrameworkCore.VistaDB.Infrastructure.Internal;
 
@@ -47,6 +48,7 @@ public class VistaDBModelValidator : RelationalModelValidator
         ValidateNoMemoryOptimizedTables(model);
 
         base.Validate(model, logger);
+        ValidatePhysicalNames(model);
 
         // VistaDB: no analog — SqlServer additionally validates decimal columns, vector columns,
         // byte-identity mapping, and temporal tables here. VistaDB rejects temporal tables outright
@@ -60,6 +62,46 @@ public class VistaDBModelValidator : RelationalModelValidator
         ValidateByteIdentityMapping(model, logger);
         ValidateTemporalTables(model, logger);
         */
+    }
+
+    private static void ValidatePhysicalNames(IModel model)
+    {
+        var tables = new Dictionary<string, string>(StringComparer.Ordinal);
+        var columns = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var entityType in model.GetEntityTypes())
+        {
+            if (entityType.GetTableName() is not { } tableName)
+            {
+                continue;
+            }
+
+            CheckName(tables, tableName, "table");
+            var physicalTable = VistaDBSqlGenerationHelper.SanitizeForVistaDB(tableName);
+            if (!columns.TryGetValue(physicalTable, out var tableColumns))
+            {
+                columns[physicalTable] = tableColumns = new Dictionary<string, string>(StringComparer.Ordinal);
+            }
+
+            var storeObject = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
+            foreach (var property in entityType.GetFlattenedProperties())
+            {
+                if (property.GetColumnName(storeObject) is { } columnName)
+                {
+                    CheckName(tableColumns, columnName, $"column in table '{tableName}'");
+                }
+            }
+        }
+
+        static void CheckName(Dictionary<string, string> names, string name, string kind)
+        {
+            var physicalName = VistaDBSqlGenerationHelper.SanitizeForVistaDB(name);
+            if (names.TryGetValue(physicalName, out var previous) && previous != name)
+            {
+                throw new InvalidOperationException(
+                    $"VistaDB {kind} names '{previous}' and '{name}' both map to '{physicalName}'. Configure distinct names explicitly.");
+            }
+            names[physicalName] = name;
+        }
     }
 
     /// <summary>

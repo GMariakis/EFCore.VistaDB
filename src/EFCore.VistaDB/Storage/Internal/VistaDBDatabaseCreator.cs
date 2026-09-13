@@ -53,7 +53,7 @@ public class VistaDBDatabaseCreator(
                    fileName,
                    stayExclusive: false,
                    staySingleProcess: false,
-                   encryptionKeyString: null,
+                   encryptionKeyString: VistaDBDdaAccessor.ExtractPassword(_connection.DbConnection.ConnectionString),
                    pageSize: DefaultPageSize,
                    LCID: DefaultLocaleId,
                    caseSensitive: false))
@@ -113,29 +113,15 @@ public class VistaDBDatabaseCreator(
             return;
         }
 
-        // Close the ADO.NET connection so the engine drops its cached database handle for this file.
-        try
+        // EnsureDeleted applies to this database only. Close its connection and clear its
+        // inactive ADO pool; clearing the global DDA collection disposes unrelated databases.
+        var dbConnection = _connection.DbConnection;
+        _connection.Close();
+        dbConnection.Close();
+        if (dbConnection is global::VistaDB.Provider.VistaDBConnection vistaDbConnection)
         {
-            _connection.Close();
+            global::VistaDB.Provider.VistaDBConnection.ClearPool(vistaDbConnection);
         }
-        catch
-        {
-            // Best-effort; we'll force-clear below.
-        }
-
-        // The VistaDB engine caches database handles in a static Connections collection. Without
-        // clearing it, subsequent File.Delete fails with "process cannot access the file" because
-        // the engine still has the file open. Mirror what the SqlServer provider does via
-        // SqlConnection.ClearAllPools().
-        try
-        {
-            VistaDBEngine.Connections.Clear();
-        }
-        catch
-        {
-            // If Clear() throws there's nothing we can do but try the delete anyway.
-        }
-
         File.Delete(fileName);
     }
 
@@ -171,7 +157,9 @@ public class VistaDBDatabaseCreator(
         // fails against a .vdb6 EF Core already has open — which is what this comment used to describe
         // while naming a mode the connection had stopped using. See VistaDBOpenModes.
         using var database = dda.OpenDatabase(
-            fileName, VistaDBOpenModes.ForDda(_connection.DbConnection.ConnectionString, readOnly: true), null);
+            fileName,
+            VistaDBOpenModes.ForDda(_connection.DbConnection.ConnectionString, readOnly: true),
+            VistaDBDdaAccessor.ExtractPassword(_connection.DbConnection.ConnectionString));
         var hasTables = false;
         foreach (var tableName in database.GetTableNames())
         {

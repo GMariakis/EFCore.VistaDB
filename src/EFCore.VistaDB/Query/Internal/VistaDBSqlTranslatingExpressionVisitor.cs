@@ -311,7 +311,7 @@ public class VistaDBSqlTranslatingExpressionVisitor : RelationalSqlTranslatingEx
                             _sqlExpressionFactory.Constant(
                                 methodType switch
                                 {
-                                    StartsEndsWithContains.StartsWith => LikeEscapeChar + s + "%",
+                                    StartsEndsWithContains.StartsWith => $"{LikeEscapeChar}{s}%",
                                     StartsEndsWithContains.EndsWith => "%" + LikeEscapeChar + s,
                                     StartsEndsWithContains.Contains => $"%{LikeEscapeChar}{s}%",
 
@@ -445,7 +445,7 @@ public class VistaDBSqlTranslatingExpressionVisitor : RelationalSqlTranslatingEx
 
             char s => methodType switch
             {
-                StartsEndsWithContains.StartsWith => LikeEscapeChar + s + "%",
+            StartsEndsWithContains.StartsWith => $"{LikeEscapeChar}{s}%",
                 StartsEndsWithContains.EndsWith => "%" + LikeEscapeChar + s,
                 StartsEndsWithContains.Contains => $"%{LikeEscapeChar}{s}%",
                 _ => throw new ArgumentOutOfRangeException(nameof(methodType), methodType, null)

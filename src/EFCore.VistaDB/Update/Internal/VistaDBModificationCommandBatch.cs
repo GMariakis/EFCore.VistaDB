@@ -315,7 +315,8 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
         using var database = _ddaAccessor.OpenDatabase(readOnly: false);
         foreach (var group in groups)
         {
-            using var table = database.OpenTable(group.Key.TableName, exclusive: false, readOnly: false);
+            using var table = database.OpenTable(
+                VistaDBSqlGenerationHelper.SanitizeForVistaDB(group.Key.TableName), exclusive: false, readOnly: false);
             var hadException = false;
             try
             {
@@ -341,7 +342,8 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
                         // column setter expects the PROVIDER CLR type (e.g. DateTime). EF Core's SQL
                         // path applies the converter at parameter binding; the DDA path bypasses that,
                         // so we apply it inline.
-                        var dest = table.Get(col.ColumnName);
+                        var columnName = VistaDBSqlGenerationHelper.SanitizeForVistaDB(col.ColumnName);
+                        var dest = table.Get(columnName);
                         var value = col.Value;
                         if (value is not null
                             && col.Property?.GetTypeMapping().Converter is { } converter)
@@ -349,25 +351,27 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
                             value = converter.ConvertToProvider(value);
                         }
                         dest.Value = value;
-                        table.Put(col.ColumnName, dest);
+                        table.Put(columnName, dest);
                     }
 
                     table.Post();
 
-                    // Populate read-back values from the post-insert row state. For an identity-insert
-                    // INSERT, IsRead is typically set on the PK column (for the SELECT-back EF Core
-                    // would normally do via SQL). When the row carries an explicit write value
-                    // (UseCurrentValueParameter == true) we copy it back — that's what VistaDB
-                    // persisted under IdentityInsert ON. When there is no explicit write value, we
-                    // intentionally leave the column alone: assigning null would crash for
-                    // non-nullable CLR types (e.g. ResultType.ResultValue : decimal where the column
-                    // was flagged IsRead but no value was provided by the caller). EF Core's existing
-                    // tracking value remains in effect for that property.
+                    // Post leaves the persisted row available through Get, including defaults and
+                    // timestamp values. Propagate the stored value through the mapping converter,
+                    // just as the SQL reader path does, instead of retaining the pre-insert value.
                     foreach (var col in command.ColumnModifications)
                     {
-                        if (col.IsRead && col.UseCurrentValueParameter)
+                        if (col.IsRead)
                         {
-                            col.Value = col.Value;
+                            var value = table.Get(VistaDBSqlGenerationHelper.SanitizeForVistaDB(col.ColumnName)).Value;
+                            if (value is DBNull)
+                            {
+                                value = null;
+                            }
+
+                            col.Value = col.TypeMapping?.Converter is { } converter
+                                ? converter.ConvertFromProvider(value)
+                                : value;
                         }
                     }
                 }
@@ -424,7 +428,7 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
         int commandIndex,
         int expectedRowsAffected,
         int rowsAffected)
-        => throw BuildZeroRowsException(commandIndex, expectedRowsAffected, rowsAffected);
+        => throw BuildZeroRowsException(commandIndex, expectedRowsAffected, rowsAffected, async: false).GetAwaiter().GetResult();
 
     /// <summary>
     ///     Decides which exception a "0 rows affected" deserves, by asking the store whether the rows
@@ -439,7 +443,8 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
     ///     surfaces for the same scenarios (it rejects them in the engine, where VistaDB silently
     ///     affects no rows instead).
     /// </summary>
-    private DbUpdateException BuildZeroRowsException(int commandIndex, int expectedRowsAffected, int rowsAffected)
+    private async ValueTask<DbUpdateException> BuildZeroRowsException(
+        int commandIndex, int expectedRowsAffected, int rowsAffected, bool async, CancellationToken cancellationToken = default)
     {
         // AggregateEntries in the base is private; inline the same logic.
         var entries = new List<IUpdateEntry>();
@@ -453,7 +458,7 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
         var message = Microsoft.EntityFrameworkCore.Diagnostics.RelationalStrings
             .UpdateConcurrencyException(expectedRowsAffected, rowsAffected);
 
-        return TargetRowsAreStillPresent(commands)
+        return await TargetRowsAreStillPresent(commands, async, cancellationToken).ConfigureAwait(false)
             ? new DbUpdateException(message, (Exception?)null, entries)
             : new DbUpdateConcurrencyException(message, (Exception?)null, entries);
     }
@@ -468,26 +473,28 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
     ///     <see cref="DbUpdateException" /> this provider threw for every case before. A wrong guess
     ///     must never turn a diagnostic into a different failure.
     /// </remarks>
-    private bool TargetRowsAreStillPresent(IReadOnlyList<IReadOnlyModificationCommand> commands)
+    private async ValueTask<bool> TargetRowsAreStillPresent(
+        IReadOnlyList<IReadOnlyModificationCommand> commands, bool async, CancellationToken cancellationToken)
     {
-        if (_connection?.DbConnection is not { } dbConnection || commands.Count == 0)
+        if (_connection is null || commands.Count == 0)
         {
             return true;
         }
 
         try
         {
-            foreach (IReadOnlyModificationCommand command in commands)
+            foreach (var command in commands)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var conditions = command.ColumnModifications.Where(c => c.IsCondition).ToList();
                 if (conditions.Count == 0)
                 {
-                    // An insert has nothing to look for.
                     return true;
                 }
 
-                using var probe = dbConnection.CreateCommand();
-                var sql = new StringBuilder("SELECT COUNT(*) FROM ")
+                var builder = Dependencies.CommandBuilderFactory.Create();
+                var values = new Dictionary<string, object?>();
+                builder.Append("SELECT COUNT(*) FROM ")
                     .Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(command.TableName, command.Schema))
                     .Append(" WHERE ");
 
@@ -495,49 +502,63 @@ public class VistaDBModificationCommandBatch : AffectedCountModificationCommandB
                 {
                     if (i > 0)
                     {
-                        sql.Append(" AND ");
+                        builder.Append(" AND ");
                     }
 
-                    var parameterName = $"@probe{i}";
-                    sql.Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(conditions[i].ColumnName))
-                        .Append(" = ")
-                        .Append(parameterName);
+                    var condition = conditions[i];
+                    var value = condition.UseOriginalValueParameter ? condition.OriginalValue : condition.Value;
+                    builder.Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(condition.ColumnName));
+                    if (value is null or DBNull)
+                    {
+                        builder.Append(" IS NULL");
+                        continue;
+                    }
 
-                    var parameter = probe.CreateParameter();
-                    parameter.ParameterName = parameterName;
-                    parameter.Value = conditions[i].UseOriginalValueParameter
-                        ? conditions[i].OriginalValue ?? DBNull.Value
-                        : conditions[i].Value ?? DBNull.Value;
-                    probe.Parameters.Add(parameter);
+                    var mapping = condition.TypeMapping;
+                    if (mapping is null)
+                    {
+                        // Without the original mapping we cannot safely classify a converted key.
+                        return true;
+                    }
+
+                    var invariantName = $"probe{i}";
+                    var parameterName = Dependencies.SqlGenerationHelper.GenerateParameterName(invariantName);
+                    builder.Append(" = ").Append(parameterName);
+                    builder.AddParameter(invariantName, parameterName, mapping, condition.IsNullable);
+                    values.Add(invariantName, value);
                 }
 
-                probe.CommandText = sql.ToString();
-
-                if (Convert.ToInt32(probe.ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
+                // Relational commands preserve the current transaction, type converters, timeout,
+                // command diagnostics and interception. The async path also forwards cancellation.
+                var probe = builder.Build();
+                var parameters = new RelationalCommandParameterObject(
+                    _connection, values, null, Dependencies.CurrentContext.Context, Dependencies.Logger,
+                    CommandSource.SaveChanges);
+                var count = async
+                    ? await probe.ExecuteScalarAsync(parameters, cancellationToken).ConfigureAwait(false)
+                    : probe.ExecuteScalar(parameters);
+                if (Convert.ToInt32(count, CultureInfo.InvariantCulture) == 0)
                 {
-                    // The row this statement aimed at is gone, or no longer matches its concurrency
-                    // token. Somebody else got there first.
                     return false;
                 }
             }
 
             return true;
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Diagnostics must not become the failure. Fall back to the plain exception.
+            // Preserve the original failed-write diagnostic if the classification probe fails.
             return true;
         }
     }
-
     /// <inheritdoc cref="ThrowAggregateUpdateConcurrencyException" />
-    protected override Task ThrowAggregateUpdateConcurrencyExceptionAsync(
+    protected override async Task ThrowAggregateUpdateConcurrencyExceptionAsync(
         RelationalDataReader reader,
         int commandIndex,
         int expectedRowsAffected,
         int rowsAffected,
         CancellationToken cancellationToken)
-        => throw BuildZeroRowsException(commandIndex, expectedRowsAffected, rowsAffected);
+        => throw await BuildZeroRowsException(commandIndex, expectedRowsAffected, rowsAffected, async: true, cancellationToken).ConfigureAwait(false);
 
     // VistaDB: no analog — SqlServer accumulates pending INSERTs into a MERGE ... OUTPUT batch. VistaDB
     // supports neither MERGE nor OUTPUT, so we let the base ReaderModificationCommandBatch route each

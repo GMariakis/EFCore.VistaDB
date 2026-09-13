@@ -64,7 +64,7 @@ public class VistaDBSqlGenerationHelper : RelationalSqlGenerationHelper
     // deterministic, reversible-ish mapping so different generic instantiations don't collide.
     // Also handle VistaDB-reserved words that EF Core models use as column/table names
     // (e.g. "Save" — VistaDB reserves SAVE for SAVE TRANSACTION savepoint syntax).
-    private static string SanitizeForVistaDB(string identifier)
+    internal static string SanitizeForVistaDB(string identifier)
     {
         if (s_reservedWords.Contains(identifier))
         {
