@@ -63,7 +63,7 @@ public class VistaDBValueGeneratorSelector : RelationalValueGeneratorSelector
     /// <param name="typeBase">The owning type.</param>
     /// <returns>The value generator, or <see langword="null" /> if none can be created.</returns>
     [Obsolete("Use TrySelect and throw if needed when the generator is not found.")]
-    public override ValueGenerator? Select(IProperty property, ITypeBase typeBase)
+    public virtual ValueGenerator? Select(IProperty property, ITypeBase typeBase)
     {
         if (TrySelect(property, typeBase, out var valueGenerator))
         {
