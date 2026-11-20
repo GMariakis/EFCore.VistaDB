@@ -4600,9 +4600,6 @@ public abstract class LazyLoadProxyTestBase<TFixture>(TFixture fixture) : IClass
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public bool Alive { get; set; }
-
-        public virtual Culture Culture { get; set; }
-        public virtual Milk Milk { get; set; } = null!;
     }
 
     public class Entity
@@ -4631,9 +4628,6 @@ public abstract class LazyLoadProxyTestBase<TFixture>(TFixture fixture) : IClass
     {
         public string? HostName { get; set; }
         public double Rating { get; set; }
-
-        public virtual Culture Culture { get; set; }
-        public virtual Milk Milk { get; set; } = null!;
     }
 
     public abstract class Tribe
@@ -5123,22 +5117,16 @@ public abstract class LazyLoadProxyTestBase<TFixture>(TFixture fixture) : IClass
                     Writer = new Person
                     {
                         FirstName = "firstNameWriter0",
-                        LastName = "lastNameWriter0",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        LastName = "lastNameWriter0"
                     },
                     Reader = new Person
                     {
                         FirstName = "firstNameReader0",
-                        LastName = "lastNameReader0",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        LastName = "lastNameReader0"
                     },
                     Host = new Host
                     {
-                        HostName = "127.0.0.1",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        HostName = "127.0.0.1"
                     },
                     Culture = CreateCulture(),
                     Milk = CreateMilk()
@@ -5150,22 +5138,16 @@ public abstract class LazyLoadProxyTestBase<TFixture>(TFixture fixture) : IClass
                     Writer = new Person
                     {
                         FirstName = "firstNameWriter1",
-                        LastName = "lastNameWriter1",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        LastName = "lastNameWriter1"
                     },
                     Reader = new Person
                     {
                         FirstName = "firstNameReader1",
-                        LastName = "lastNameReader1",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        LastName = "lastNameReader1"
                     },
                     Host = new Host
                     {
-                        HostName = "127.0.0.2",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        HostName = "127.0.0.2"
                     },
                     Culture = CreateCulture(),
                     Milk = CreateMilk()
@@ -5177,22 +5159,16 @@ public abstract class LazyLoadProxyTestBase<TFixture>(TFixture fixture) : IClass
                     Writer = new Person
                     {
                         FirstName = "firstNameWriter2",
-                        LastName = "lastNameWriter2",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        LastName = "lastNameWriter2"
                     },
                     Reader = new Person
                     {
                         FirstName = "firstNameReader2",
-                        LastName = "lastNameReader2",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        LastName = "lastNameReader2"
                     },
                     Host = new Host
                     {
-                        HostName = "127.0.0.3",
-                        Culture = CreateCulture(),
-                        Milk = CreateMilk()
+                        HostName = "127.0.0.3"
                     },
                     Culture = CreateCulture(),
                     Milk = CreateMilk()

@@ -23,7 +23,7 @@ public class TableValuedDbFunctionConventionTest
         var entityType = model.FindEntityType(typeof(KeylessEntity));
 
         Assert.Null(entityType.FindPrimaryKey());
-        Assert.Equal("KeylessEntity", entityType.GetViewOrTableMappings().Single().Table.Name);
+        Assert.Equal("KeylessEntity", entityType.GetTableMappings().Single().Table.Name);
     }
 
     [ConditionalFact]
@@ -41,7 +41,7 @@ public class TableValuedDbFunctionConventionTest
         var entityType = model.FindEntityType(typeof(TestEntity));
 
         Assert.Equal(nameof(TestEntity.Name), entityType.FindPrimaryKey().Properties.Single().Name);
-        Assert.Equal("TestTable", entityType.GetViewOrTableMappings().Single().Table.Name);
+        Assert.Equal("TestTable", entityType.GetTableMappings().Single().Table.Name);
     }
 
     [ConditionalFact]

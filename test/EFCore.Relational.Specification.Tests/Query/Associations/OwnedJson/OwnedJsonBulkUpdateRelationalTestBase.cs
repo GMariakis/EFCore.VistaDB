@@ -59,10 +59,7 @@ public abstract class OwnedJsonBulkUpdateRelationalTestBase<TFixture> : BulkUpda
                 rowsAffectedCount: 0));
     }
 
-    protected static async Task AssertTranslationFailedWithDetails(string details, Func<Task> query)
-    {
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(query);
-        Assert.Contains(CoreStrings.NonQueryTranslationFailedWithDetails("", details)[21..], exception.Message);
-    }
+    protected static Task AssertTranslationFailedWithDetails(string details, Func<Task> query)
+        => TestHelpers.AssertNonQueryTranslationFailed(details, query);
 }
 

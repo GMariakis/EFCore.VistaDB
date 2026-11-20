@@ -163,11 +163,8 @@ public abstract class NonSharedModelBulkUpdatesRelationalTestBase(NonSharedFixtu
 
     #region HelperMethods
 
-    protected static async Task AssertTranslationFailedWithDetails(Func<Task> query, string details)
-        => Assert.Contains(
-            CoreStrings.NonQueryTranslationFailedWithDetails("", details)[21..],
-            (await Assert.ThrowsAsync<InvalidOperationException>(query))
-            .Message);
+    protected static Task AssertTranslationFailedWithDetails(Func<Task> query, string details)
+        => TestHelpers.AssertNonQueryTranslationFailed(details, query);
 
     public override void UseTransaction(DatabaseFacade facade, IDbContextTransaction transaction)
         => facade.UseTransaction(transaction.GetDbTransaction());

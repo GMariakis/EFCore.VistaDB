@@ -760,10 +760,9 @@ public abstract class TableSplittingTestBase : NonSharedModelTestBase, IClassFix
         await TestHelpers.ExecuteWithStrategyInTransactionAsync(
             CreateContext,
             UseTransaction,
-            async context => Assert.Contains(
-                CoreStrings.NonQueryTranslationFailedWithDetails(
-                    "", RelationalStrings.ExecuteDeleteOnTableSplitting("Vehicles"))[21..],
-                (await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            context => TestHelpers.AssertNonQueryTranslationFailed(
+                RelationalStrings.ExecuteDeleteOnTableSplitting("Vehicles"),
+                async () =>
                 {
                     if (async)
                     {
@@ -773,7 +772,7 @@ public abstract class TableSplittingTestBase : NonSharedModelTestBase, IClassFix
                     {
                         context.Set<Vehicle>().ExecuteDelete();
                     }
-                })).Message));
+                }));
     }
 
     [ConditionalTheory, MemberData(nameof(IsAsyncData))]

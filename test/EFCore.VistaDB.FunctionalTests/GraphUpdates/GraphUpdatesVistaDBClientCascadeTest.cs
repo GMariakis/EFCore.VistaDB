@@ -26,7 +26,7 @@ public class GraphUpdatesVistaDBClientCascadeTest(GraphUpdatesVistaDBClientCasca
             foreach (var foreignKey in modelBuilder.Model
                          .GetEntityTypes()
                          .SelectMany(e => e.GetDeclaredForeignKeys())
-                         .Where(e => e.DeleteBehavior == DeleteBehavior.Cascade))
+                         .Where(fk => !fk.IsOwnership && fk.DeleteBehavior == DeleteBehavior.Cascade))
             {
                 foreignKey.DeleteBehavior = DeleteBehavior.ClientCascade;
             }

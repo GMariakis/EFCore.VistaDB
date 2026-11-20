@@ -12,13 +12,10 @@
     <PackageVersion Include="Azure.ResourceManager.CosmosDB" Version="$(AzureResourceManagerCosmosDBVersion)" />
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="9.0.5" />
     <PackageVersion Include="Microsoft.AspNetCore.OData" Version="9.3.1" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="$(MicrosoftExtensionsConfigurationVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="$(MicrosoftExtensionsConfigurationEnvironmentVariablesVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="$(MicrosoftExtensionsConfigurationJsonVersion)" />
     <PackageVersion Include="IdentityServer4.EntityFramework" Version="4.1.2" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.71.0" />
-    <PackageVersion Include="NetTopologySuite.IO.GeoJSON" Version="4.0.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="$(OpenTelemetryExporterInMemoryVersion)" />
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="$(SQLitePCLRawVersion)" />
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3mc" Version="$(SQLitePCLRawVersion)" />
     <PackageVersion Include="SQLitePCLRaw.bundle_winsqlite3" Version="$(SQLitePCLRawVersion)" />

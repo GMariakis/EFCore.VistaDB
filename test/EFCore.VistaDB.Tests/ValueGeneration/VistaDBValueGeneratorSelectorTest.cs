@@ -3,6 +3,7 @@
 
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore.ValueGeneration.Internal;
+using Microsoft.EntityFrameworkCore.VistaDB.ValueGeneration.Internal;
 
 // ReSharper disable UnusedMember.Local
 namespace Microsoft.EntityFrameworkCore.ValueGeneration;
@@ -58,7 +59,7 @@ public class VistaDBValueGeneratorSelectorTest
         else
         {
 #pragma warning disable CS0618 // Type or member is obsolete
-            generator = selector.Select(property, property.DeclaringType);
+            generator = Assert.IsType<VistaDBValueGeneratorSelector>(selector).Select(property, property.DeclaringType);
 #pragma warning restore CS0618 // Type or member is obsolete
         }
 
@@ -159,7 +160,8 @@ public class VistaDBValueGeneratorSelectorTest
 
         Assert.Equal(
             CoreStrings.NoValueGenerator("TimeSpan", "AnEntity", "TimeSpan"),
-            Assert.Throws<NotSupportedException>((Action)(() => selector.Select(entityType.FindProperty("TimeSpan"), entityType))).Message);
+            Assert.Throws<NotSupportedException>(
+                () => CreateValueGenerator(selector, entityType.FindProperty("TimeSpan"), useTry: false)).Message);
     }
 
     private class AnEntity

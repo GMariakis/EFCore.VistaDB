@@ -866,7 +866,7 @@ public partial class RelationalModelValidatorTest : ModelValidatorTest
     {
         var modelBuilder = CreateConventionModelBuilder();
         modelBuilder.Entity<Animal>().ToTable("Animal");
-        modelBuilder.Entity<Cat>().ToTable("Cat").SplitToTable("CatDetails", s => s.Property(a => a.Name));
+        modelBuilder.Entity<Cat>().ToTable("Cat").SplitToTable("CatDetails", s => s.Property(c => c.Breed));
 
         VerifyError(
             RelationalStrings.EntitySplittingHierarchy(nameof(Cat), "CatDetails"),
@@ -877,7 +877,7 @@ public partial class RelationalModelValidatorTest : ModelValidatorTest
     public virtual void Detects_entity_splitting_with_unmapped_main()
     {
         var modelBuilder = CreateConventionModelBuilder();
-        modelBuilder.Entity<Animal>().SplitToView("AnimalDetails", s => s.Property(a => a.Name));
+        modelBuilder.Entity<Animal>().SplitToView("AnimalDetails", s => s.Property(a => a.Id).HasColumnName("AnimalId"));
 
         VerifyError(
             RelationalStrings.EntitySplittingUnmappedMainFragment(nameof(Animal), "AnimalDetails", "View"),
@@ -3520,7 +3520,7 @@ public partial class RelationalModelValidatorTest : ModelValidatorTest
         modelBuilder.Entity<Animal>().HasIndex(nameof(Animal.Id), nameof(Animal.Name));
 
         var definition = RelationalResources
-            .LogUnnamedIndexAllPropertiesNotToMappedToAnyTable(
+            .LogUnnamedIndexAllPropertiesNotMappedToAnyTable(
                 new TestLogger<TestRelationalLoggingDefinitions>());
         VerifyWarning(
             definition.GenerateMessage(
@@ -3541,7 +3541,7 @@ public partial class RelationalModelValidatorTest : ModelValidatorTest
                 "IX_AllPropertiesNotMapped");
 
         var definition = RelationalResources
-            .LogNamedIndexAllPropertiesNotToMappedToAnyTable(
+            .LogNamedIndexAllPropertiesNotMappedToAnyTable(
                 new TestLogger<TestRelationalLoggingDefinitions>());
         VerifyWarning(
             definition.GenerateMessage(

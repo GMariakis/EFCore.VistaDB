@@ -19,10 +19,6 @@ public class TransactionVistaDBTest(TransactionVistaDBTest.TransactionVistaDBFix
         => base.SaveChanges_can_be_used_with_AutoTransactionBehavior_Never(async);
 
     [ConditionalTheory]
-    public override Task SaveChanges_can_be_used_with_AutoTransactionsEnabled_false(bool async)
-        => base.SaveChanges_can_be_used_with_AutoTransactionsEnabled_false(async);
-
-    [ConditionalTheory]
     public override Task SaveChanges_can_be_used_with_AutoTransactionBehavior_Always(bool async)
         => base.SaveChanges_can_be_used_with_AutoTransactionBehavior_Always(async);
 

@@ -158,6 +158,9 @@ public class RelationalEventIdTest : EventIdTestBase
         public Assembly Assembly
             => typeof(FakeMigrationsAssembly).Assembly;
 
+        public void AddMigrations(Assembly additionalMigrationsAssembly)
+            => throw new NotImplementedException();
+
         public Migration CreateMigration(TypeInfo migrationClass, string activeProvider)
             => throw new NotImplementedException();
 

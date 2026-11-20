@@ -1448,6 +1448,11 @@ public partial class ModelValidatorTest : ModelValidatorTestBase
 
         Assert.NotNull(ownedTypeBuilder.HasBaseType(typeof(A), ConfigurationSource.DataAnnotation));
 
+        var baseType = (IMutableEntityType)anotherEntityTypeBuilder.Metadata;
+        baseType.SetDiscriminatorProperty(baseType.AddProperty("Discriminator", typeof(string)));
+        baseType.SetDiscriminatorValue(nameof(A));
+        ((IMutableEntityType)ownedTypeBuilder.Metadata).SetDiscriminatorValue(nameof(D));
+
         VerifyError(CoreStrings.OwnedDerivedType(nameof(D)), builder);
     }
 

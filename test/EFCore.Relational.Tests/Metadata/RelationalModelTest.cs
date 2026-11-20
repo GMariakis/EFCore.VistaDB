@@ -307,7 +307,7 @@ namespace Microsoft.EntityFrameworkCore.Metadata
         {
             var orderType = model.Model.FindEntityType(typeof(Order))!;
             var orderMapping = orderType.GetViewMappings().Single();
-            Assert.Equal(orderType.GetViewMappings(), orderType.GetViewOrTableMappings());
+            Assert.Equal(orderType.GetViewMappings(), orderType.GetQueryMappings());
             Assert.Null(orderMapping.IncludesDerivedTypes);
             Assert.Equal(
                 [nameof(Order.Id), nameof(Order.AlternateId), nameof(Order.CustomerId), nameof(Order.OrderDate)],
@@ -3229,7 +3229,7 @@ namespace Microsoft.EntityFrameworkCore.Metadata
                 configureContext: b =>
                     b.ConfigureWarnings(w => w.Default(WarningBehavior.Throw)
                         .Ignore(RelationalEventId.ForeignKeyTpcPrincipalWarning)
-                        .Ignore(RelationalEventId.AllIndexPropertiesNotToMappedToAnyTable)));
+                        .Ignore(RelationalEventId.AllIndexPropertiesNotMappedToAnyTable)));
 
         public static void AssertEqual(IRelationalModel expectedModel, IRelationalModel actualModel)
             => RelationalModelAsserter.Instance.AssertEqual(expectedModel, actualModel);

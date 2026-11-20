@@ -37,10 +37,8 @@ public abstract class InheritanceBulkUpdatesRelationalTestBase<TFixture> : Inher
                 s => s.SetProperty(e => e.Name, "Eagle"),
                 rowsAffectedCount: 1));
 
-    protected static async Task AssertTranslationFailed(string details, Func<Task> query)
-        => Assert.Contains(
-            CoreStrings.NonQueryTranslationFailedWithDetails("", details)[21..],
-            (await Assert.ThrowsAsync<InvalidOperationException>(query)).Message);
+    protected static Task AssertTranslationFailed(string details, Func<Task> query)
+        => TestHelpers.AssertNonQueryTranslationFailed(details, query);
 
     protected virtual void ClearLog()
         => Fixture.TestSqlLoggerFactory.Clear();

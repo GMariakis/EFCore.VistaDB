@@ -116,7 +116,8 @@ public class GraphUpdatesVistaDBClientNoActionTest(GraphUpdatesVistaDBClientNoAc
 
             foreach (var foreignKey in modelBuilder.Model
                          .GetEntityTypes()
-                         .SelectMany(e => e.GetDeclaredForeignKeys()))
+                         .SelectMany(e => e.GetDeclaredForeignKeys())
+                         .Where(fk => !fk.IsOwnership))
             {
                 foreignKey.DeleteBehavior = DeleteBehavior.ClientNoAction;
             }

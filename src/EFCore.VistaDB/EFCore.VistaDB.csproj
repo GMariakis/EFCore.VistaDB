@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <Version>1.0.10</Version>
-    <PackageReleaseNotes>1.0.10 - Provider review fixes for identifier consistency, generated-value readback, mapped concurrency probes, identity seed/increment metadata, column alterations, migration history and coordination, migration operation preservation, encrypted database handling, targeted connection cleanup, scaffolding lengths, and string/time translations. Preserves the multiprocess default and existing DDA identity-insert workaround. Known DDA transaction, alternate-key enforcement, and mixed open-mode limitations remain; see the provider review progress document.</PackageReleaseNotes>
+    <Version>11.0.0</Version>
+    <PackageReleaseNotes>Targets .NET 11 and Entity Framework Core 11 with the VistaDB 6.6.2 engine.</PackageReleaseNotes>
     <Description>VistaDB database provider for Entity Framework Core.</Description>
     <AssemblyName>Microsoft.EntityFrameworkCore.VistaDB</AssemblyName>
     <RootNamespace>Microsoft.EntityFrameworkCore.VistaDB</RootNamespace>

@@ -12,6 +12,14 @@ namespace Microsoft.EntityFrameworkCore.TestUtilities;
 
 public abstract class TestHelpers
 {
+    public static async Task AssertNonQueryTranslationFailed(string details, Func<Task> query)
+    {
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(query);
+        Assert.StartsWith(CoreStrings.NonQueryTranslationFailed("")[..^1], exception.Message);
+        var innerException = Assert.IsType<InvalidOperationException>(exception.InnerException);
+        Assert.Equal(details, innerException.Message);
+    }
+
     public DbContextOptions CreateOptions(IModel model, IServiceProvider? serviceProvider = null)
     {
         var optionsBuilder = new DbContextOptionsBuilder()

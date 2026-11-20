@@ -214,6 +214,9 @@ public class RelationalDatabaseFacadeExtensionsTest
         public ModelSnapshot ModelSnapshot { get; set; }
         public Assembly Assembly { get; }
 
+        public void AddMigrations(Assembly additionalMigrationsAssembly)
+            => throw new NotImplementedException();
+
         public string FindMigrationId(string nameOrId)
             => throw new NotImplementedException();
 
